@@ -1,5 +1,6 @@
-"""Tests for event registration flow."""
+"""Tests for event registration flow (3-scenario guest verification)."""
 
+import json
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -7,6 +8,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.users import User
+
+# ── Scenario 1: Authenticated user -> direct payment ──────────────
 
 
 async def test_register_for_event_authenticated(
@@ -44,6 +47,7 @@ async def test_register_for_event_authenticated(
     assert data["payment_url"] is not None
     assert data["applied_price"] == 2000.0
     assert data["is_member_price"] is False
+    assert data["action"] is None
 
 
 async def test_register_member_gets_discount(
@@ -114,47 +118,282 @@ async def test_register_seat_limit(
     assert resp.status_code == 422
 
 
-async def test_register_guest_flow(
+# ── Scenario 2: Unauthenticated, email exists -> verify_existing ──
+
+
+async def test_register_guest_existing_email(
     client: AsyncClient,
     db_session: AsyncSession,
 ):
     from tests.factories import create_event, create_event_tariff, create_user
 
-    admin = await create_user(db_session, email="evt_admin4@test.com")
+    admin = await create_user(db_session, email="evt_admin_ex@test.com")
+    existing = await create_user(db_session, email="existing_guest@test.com")
     event = await create_event(db_session, created_by=admin)
     tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
-
-
-    from tests.factories import create_role
-
-    await create_role(db_session, name="user", title="User")
     await db_session.commit()
 
-    mock_resp = {
-        "id": "yoo_guest_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/guest"},
-    }
+    resp = await client.post(
+        f"/api/v1/events/{event.id}/register",
+        json={
+            "tariff_id": str(tariff.id),
+            "idempotency_key": uuid4().hex,
+            "guest_email": existing.email,
+        },
+    )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["action"] == "verify_existing"
+    assert data["masked_email"] == "e***@test.com"
+    assert data["registration_id"] is None
+    assert data["payment_url"] is None
+
+
+# ── Scenario 3: Unauthenticated, new email -> verify_new_email ────
+
+
+async def test_register_guest_new_email_sends_code(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    redis_mock: AsyncMock,
+):
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_new@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
+    await db_session.commit()
+
+    guest_email = f"newguest_{uuid4().hex[:6]}@test.com"
 
     with patch(
-        "app.services.event_registration_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_resp,
-    ):
+        "app.tasks.email_tasks.send_event_verification_code",
+    ) as mock_task:
+        mock_task.kiq = AsyncMock()
         resp = await client.post(
             f"/api/v1/events/{event.id}/register",
             json={
                 "tariff_id": str(tariff.id),
                 "idempotency_key": uuid4().hex,
-                "guest_full_name": "Guest User",
-                "guest_email": f"guest_{uuid4().hex[:6]}@test.com",
+                "guest_email": guest_email,
             },
         )
 
     assert resp.status_code == 201
     data = resp.json()
+    assert data["action"] == "verify_new_email"
+    assert data["masked_email"] is not None
+    assert data["registration_id"] is None
+
+    redis_mock.set.assert_called()
+    stored_call = redis_mock.set.call_args
+    assert f"event_reg_verify:{guest_email}" == stored_call[0][0]
+
+
+async def test_confirm_guest_registration_success(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    redis_mock: AsyncMock,
+):
+    from tests.factories import create_event, create_event_tariff, create_role, create_user
+
+    admin = await create_user(db_session, email="evt_admin_confirm@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
+    await create_role(db_session, name="user", title="User")
+    await db_session.commit()
+
+    guest_email = f"confirm_{uuid4().hex[:6]}@test.com"
+    code = "123456"
+
+    await redis_mock.set(
+        f"event_reg_verify:{guest_email}",
+        json.dumps({
+            "code": code,
+            "event_id": str(event.id),
+            "tariff_id": str(tariff.id),
+        }),
+    )
+
+    mock_resp = {
+        "id": "yoo_confirm_" + uuid4().hex[:8],
+        "status": "pending",
+        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/confirm"},
+    }
+
+    with (
+        patch(
+            "app.services.event_registration_service.YooKassaClient.create_payment",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ),
+        patch(
+            "app.tasks.email_tasks.send_guest_account_created",
+        ) as mock_email,
+    ):
+        mock_email.kiq = AsyncMock()
+        resp = await client.post(
+            f"/api/v1/events/{event.id}/confirm-guest-registration",
+            json={
+                "email": guest_email,
+                "code": code,
+                "tariff_id": str(tariff.id),
+                "idempotency_key": uuid4().hex,
+            },
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["registration_id"] is not None
+    assert data["payment_url"] == "https://yookassa.ru/pay/confirm"
     assert data["applied_price"] == 2000.0
     assert data["is_member_price"] is False
+
+
+# ── Invalid code ─────────────────────────────────────────────────
+
+
+async def test_confirm_guest_registration_invalid_code(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    redis_mock: AsyncMock,
+):
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_inv@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
+    await db_session.commit()
+
+    guest_email = f"invalid_{uuid4().hex[:6]}@test.com"
+
+    await redis_mock.set(
+        f"event_reg_verify:{guest_email}",
+        json.dumps({
+            "code": "123456",
+            "event_id": str(event.id),
+            "tariff_id": str(tariff.id),
+        }),
+    )
+
+    resp = await client.post(
+        f"/api/v1/events/{event.id}/confirm-guest-registration",
+        json={
+            "email": guest_email,
+            "code": "999999",
+            "tariff_id": str(tariff.id),
+            "idempotency_key": uuid4().hex,
+        },
+    )
+
+    assert resp.status_code == 422
+    assert "Invalid verification code" in resp.json()["error"]["message"]
+
+
+async def test_confirm_guest_registration_expired_code(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    redis_mock: AsyncMock,
+):
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_exp@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
+    await db_session.commit()
+
+    guest_email = f"expired_{uuid4().hex[:6]}@test.com"
+
+    resp = await client.post(
+        f"/api/v1/events/{event.id}/confirm-guest-registration",
+        json={
+            "email": guest_email,
+            "code": "123456",
+            "tariff_id": str(tariff.id),
+            "idempotency_key": uuid4().hex,
+        },
+    )
+
+    assert resp.status_code == 422
+    assert "expired" in resp.json()["error"]["message"].lower()
+
+
+# ── Attempt limit ────────────────────────────────────────────────
+
+
+async def test_confirm_guest_registration_attempt_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    redis_mock: AsyncMock,
+):
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_lim@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
+    await db_session.commit()
+
+    guest_email = f"limit_{uuid4().hex[:6]}@test.com"
+
+    await redis_mock.set(
+        f"event_reg_verify:{guest_email}",
+        json.dumps({
+            "code": "123456",
+            "event_id": str(event.id),
+            "tariff_id": str(tariff.id),
+        }),
+    )
+
+    await redis_mock.set(f"event_reg_attempts:{guest_email}", "5")
+
+    resp = await client.post(
+        f"/api/v1/events/{event.id}/confirm-guest-registration",
+        json={
+            "email": guest_email,
+            "code": "123456",
+            "tariff_id": str(tariff.id),
+            "idempotency_key": uuid4().hex,
+        },
+    )
+
+    assert resp.status_code == 422
+    assert "Too many verification attempts" in resp.json()["error"]["message"]
+
+
+# ── Send code rate limit ─────────────────────────────────────────
+
+
+async def test_register_guest_send_code_rate_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    redis_mock: AsyncMock,
+):
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_rl@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
+    await db_session.commit()
+
+    guest_email = f"ratelimit_{uuid4().hex[:6]}@test.com"
+
+    await redis_mock.set(f"event_reg_send_count:{guest_email}", "3")
+
+    resp = await client.post(
+        f"/api/v1/events/{event.id}/register",
+        json={
+            "tariff_id": str(tariff.id),
+            "idempotency_key": uuid4().hex,
+            "guest_email": guest_email,
+        },
+    )
+
+    assert resp.status_code == 422
+    assert "Too many verification codes sent" in resp.json()["error"]["message"]
+
+
+# ── Edge cases ───────────────────────────────────────────────────
 
 
 async def test_register_event_not_found(
@@ -194,6 +433,24 @@ async def test_register_closed_event(
     resp = await client.post(
         f"/api/v1/events/{event.id}/register",
         headers=auth_headers_doctor,
+        json={"tariff_id": str(tariff.id), "idempotency_key": uuid4().hex},
+    )
+    assert resp.status_code == 422
+
+
+async def test_register_guest_no_email(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_noeml@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/events/{event.id}/register",
         json={"tariff_id": str(tariff.id), "idempotency_key": uuid4().hex},
     )
     assert resp.status_code == 422

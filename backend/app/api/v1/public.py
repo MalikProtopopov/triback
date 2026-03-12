@@ -10,7 +10,11 @@ from app.core.database import get_db_session
 from app.core.dependencies import get_optional_user_id
 from app.core.pagination import PaginatedResponse
 from app.core.redis import get_redis
-from app.schemas.event_registration import RegisterForEventRequest, RegisterForEventResponse
+from app.schemas.event_registration import (
+    ConfirmGuestRegistrationRequest,
+    RegisterForEventRequest,
+    RegisterForEventResponse,
+)
 from app.schemas.public import (
     ArticleDetailResponse,
     ArticleListItem,
@@ -106,6 +110,23 @@ async def register_for_event(
 
     svc = EventRegistrationService(db, redis)
     return await svc.register(event_id, user_id, body)
+
+
+@router.post(
+    "/events/{event_id}/confirm-guest-registration",
+    response_model=RegisterForEventResponse,
+    status_code=201,
+)
+async def confirm_guest_registration(
+    event_id: UUID,
+    body: ConfirmGuestRegistrationRequest,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> RegisterForEventResponse:
+    from app.services.event_registration_service import EventRegistrationService
+
+    svc = EventRegistrationService(db, redis)
+    return await svc.confirm_guest_registration(event_id, body)
 
 
 # ── Event Galleries (D18) ────────────────────────────────────────

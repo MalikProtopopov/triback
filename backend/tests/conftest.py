@@ -77,12 +77,23 @@ def redis_mock() -> AsyncMock:
     async def _set(key: str, value: str, **kwargs) -> None:  # noqa: ANN003
         _store[key] = value
 
-    async def _delete(key: str) -> None:
-        _store.pop(key, None)
+    async def _delete(*keys: str) -> None:
+        for k in keys:
+            _store.pop(k, None)
+
+    async def _incr(key: str) -> int:
+        val = int(_store.get(key, "0")) + 1
+        _store[key] = str(val)
+        return val
+
+    async def _expire(key: str, ttl: int) -> None:
+        pass
 
     r.get = AsyncMock(side_effect=_get)
     r.set = AsyncMock(side_effect=_set)
     r.delete = AsyncMock(side_effect=_delete)
+    r.incr = AsyncMock(side_effect=_incr)
+    r.expire = AsyncMock(side_effect=_expire)
     r.ping = AsyncMock(return_value=True)
     return r
 

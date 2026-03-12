@@ -66,3 +66,17 @@ async def send_payment_succeeded_notification(
 @broker.task  # type: ignore[misc]
 async def send_payment_failed_notification(email: str) -> None:
     logger.info("send_payment_failed_notification", email=email)
+
+
+@broker.task  # type: ignore[misc]
+async def send_event_verification_code(
+    email: str, code: str, event_title: str
+) -> None:
+    logger.info("send_event_verification_code", email=email, event=event_title)
+
+
+@broker.task  # type: ignore[misc]
+async def send_guest_account_created(
+    email: str, temp_password: str, event_title: str, frontend_url: str
+) -> None:
+    logger.info("send_guest_account_created", email=email, event=event_title)
