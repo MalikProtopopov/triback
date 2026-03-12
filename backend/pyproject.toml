@@ -1,0 +1,90 @@
+[tool.poetry]
+name = "triho-backend"
+version = "0.1.0"
+description = "Backend API for the Association of Trichologists"
+authors = ["triho"]
+readme = "README.md"
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "0.115.0"
+uvicorn = { version = "0.30.6", extras = ["standard"] }
+sqlalchemy = { version = "2.0.35", extras = ["asyncio"] }
+asyncpg = "0.29.0"
+alembic = "1.13.2"
+pydantic = "2.9.2"
+pydantic-settings = "2.5.2"
+redis = { version = "5.1.0", extras = ["hiredis"] }
+argon2-cffi = "23.1.0"
+python-jose = { version = "3.3.0", extras = ["cryptography"] }
+httpx = "0.27.2"
+aioboto3 = "13.1.1"
+taskiq = ">=0.12.0"
+taskiq-redis = ">=1.0.0"
+taskiq-fastapi = ">=0.3.2"
+structlog = "24.4.0"
+pillow = "10.4.0"
+openpyxl = "3.1.5"
+uuid-utils = "0.9.0"
+email-validator = "^2.3.0"
+python-multipart = "^0.0.22"
+python-dateutil = "^2.9.0.post0"
+reportlab = "^4.4.10"
+gunicorn = "^25.1.0"
+slowapi = "^0.1.9"
+jinja2 = "^3.1.6"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "0.6.9"
+mypy = ">=1.11"
+pytest = "8.3.3"
+pytest-asyncio = "0.24.0"
+factory-boy = "3.3.1"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+# ---------------------------------------------------------------------------
+# Tool configs
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+# B008: FastAPI uses Depends/Query in function signatures by design
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_reexport = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

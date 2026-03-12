@@ -1,0 +1,30 @@
+# RSA keys (never commit private keys)
+keys/
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Mypy
+.mypy_cache/

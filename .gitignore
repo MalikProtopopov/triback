@@ -1,0 +1,31 @@
+# Environment files with secrets
+.env.prod
+backend/.env
+
+# SSL certificates (managed by certbot)
+certbot/
+
+# Built admin SPA (deployed artifact)
+admin-dist/
+
+# Backups
+backups/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Keys
+backend/keys/

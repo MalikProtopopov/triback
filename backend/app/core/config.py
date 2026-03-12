@@ -1,0 +1,59 @@
+"""Application configuration via Pydantic Settings."""
+
+from pydantic import PostgresDsn, RedisDsn
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    # Application
+    DEBUG: bool = False
+    SECRET_KEY: str = "change-me-in-production"
+    ALLOWED_HOSTS: list[str] = ["*"]
+
+    # JWT (RS256)
+    JWT_PRIVATE_KEY_PATH: str = "keys/private.pem"
+    JWT_PUBLIC_KEY_PATH: str = "keys/public.pem"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
+    # Database
+    DATABASE_URL: PostgresDsn = PostgresDsn(
+        "postgresql+asyncpg://triho_user:triho_pass@localhost:5432/triho_db"
+    )
+
+    # Redis
+    REDIS_URL: RedisDsn = RedisDsn("redis://localhost:6379/0")
+
+    # S3 / Object Storage
+    S3_ENDPOINT_URL: str = "http://localhost:9000"
+    S3_ACCESS_KEY: str = "minioadmin"
+    S3_SECRET_KEY: str = "minioadmin"
+    S3_BUCKET: str = "triho-dev"
+
+    # YooKassa
+    YOOKASSA_SHOP_ID: str = ""
+    YOOKASSA_SECRET_KEY: str = ""
+    YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3"
+    YOOKASSA_RETURN_URL: str = "https://trichology.ru/payment/result"
+    YOOKASSA_IP_WHITELIST: str = "185.71.76.0/27,185.71.77.0/27,77.75.153.0/25,77.75.156.11/32,77.75.156.35/32"
+    PAYMENT_IDEMPOTENCY_TTL: int = 86400
+
+    # SMTP
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@triho.ru"
+
+    # Telegram
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHANNEL_ID: str = ""
+    TELEGRAM_WEBHOOK_SECRET: str = ""
+
+    # Frontend
+    FRONTEND_URL: str = "https://trichology.ru"
+
+
+settings = Settings()
