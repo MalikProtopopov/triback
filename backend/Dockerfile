@@ -3,7 +3,7 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-RUN pip install --no-cache-dir poetry==2.1.1 \
+RUN pip install --no-cache-dir poetry==2.1.1 poetry-plugin-export \
     && poetry config virtualenvs.create false
 
 COPY pyproject.toml poetry.lock ./
