@@ -1,26 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+set -a; source "$PROJECT_DIR/.env.prod"; set +a
+
 COMPOSE_FILE="docker-compose.prod.yml"
-DOMAINS=(api.triho.ru admin.triho.ru)
-CERT_EMAIL="${CERT_EMAIL:?Set CERT_EMAIL env var (e.g. admin@triho.ru)}"
 
-echo "=== Requesting certificates for: ${DOMAINS[*]} ==="
+echo "=== Requesting certificate for: ${API_DOMAIN} ==="
 
-DOMAIN_ARGS=""
-for d in "${DOMAINS[@]}"; do
-    DOMAIN_ARGS="$DOMAIN_ARGS -d $d"
-done
-
-docker compose -f "$COMPOSE_FILE" run --rm certbot certonly \
+docker compose -f "$PROJECT_DIR/$COMPOSE_FILE" run --rm certbot certonly \
     --webroot \
     -w /var/www/certbot \
-    $DOMAIN_ARGS \
+    -d "$API_DOMAIN" \
     --email "$CERT_EMAIL" \
     --agree-tos \
     --non-interactive
 
 echo "=== Restarting nginx ==="
-docker compose -f "$COMPOSE_FILE" restart nginx
+docker compose -f "$PROJECT_DIR/$COMPOSE_FILE" restart nginx
 
 echo "=== SSL initialisation complete ==="
