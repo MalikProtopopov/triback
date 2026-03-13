@@ -2,6 +2,10 @@
 
 ## Проект: «Ассоциация трихологов»
 
+> **Актуализировано 2026-03-12.** Бекенд полностью реализован и задеплоен.
+> Swagger (тест): `https://trihoback.mediann.dev/docs`
+> Справочные документы: `docs/FRONTEND_API_HANDOFF.md`, `docs/BACKEND_VS_SPEC_GAP_ANALYSIS.md`
+
 ---
 
 ## 1. Общая архитектура
@@ -2130,28 +2134,89 @@ app/
 
 #### POST /api/v1/events/{event_id}/register
 
-> ⚠️ **Вне scope текущей версии (M06).** Реализуется в модуле M09 (полный цикл мероприятий с регистрацией и оплатой). В текущей версии эндпоинт **возвращает 501 Not Implemented**. Документация сохранена для будущей реализации.
+> ✅ **РЕАЛИЗОВАН.** 3-сценарный flow с верификацией email для гостей.
 
 **Назначение:** Регистрация и инициация оплаты участия  
-**Доступ:** Авторизованный или Guest (с формой)
+**Доступ:** Авторизованный (JWT) или Guest (без JWT)
 
-**Request body (авторизованный):**
+**Request body:**
 ```json
 {
   "tariff_id": "uuid (required)",
-  "idempotency_key": "string (required)"
+  "idempotency_key": "string (required, max 255)",
+  "guest_email": "string (required если нет JWT)",
+  "guest_full_name": "string (optional, max 300)",
+  "guest_workplace": "string (optional, max 255)",
+  "guest_specialization": "string (optional, max 255)",
+  "fiscal_email": "string (optional, email для чека)"
 }
 ```
 
-**Request body (Guest):**
+**Response 201 — 3 сценария:**
+
+**Сценарий 1: Авторизованный (JWT)** — прямой redirect на оплату:
 ```json
 {
+  "registration_id": "uuid",
+  "payment_url": "https://yookassa.ru/...",
+  "applied_price": 10000.00,
+  "is_member_price": true,
+  "action": null,
+  "masked_email": null
+}
+```
+
+**Сценарий 2: Guest, email уже в базе** — фронт переключает на ввод пароля:
+```json
+{
+  "registration_id": null,
+  "payment_url": null,
+  "applied_price": null,
+  "is_member_price": null,
+  "action": "verify_existing",
+  "masked_email": "i***@example.com"
+}
+```
+
+**Сценарий 3: Guest, email новый** — отправлен 6-значный код на email:
+```json
+{
+  "registration_id": null,
+  "payment_url": null,
+  "applied_price": null,
+  "is_member_price": null,
+  "action": "verify_new_email",
+  "masked_email": "n***@example.com"
+}
+```
+
+**Ошибки:** 422 `NO_SEATS_AVAILABLE`, 422 `guest_email required`, 404 tariff not found, 422 `SEND_LIMIT_EXCEEDED` (>3 кодов/10 мин)
+
+**Redis-ключи (сценарий 3):**
+- `event_reg_verify:{email}` — хранит JSON `{code, tariff_id, event_id}`, TTL 600 сек
+- `event_reg_attempts:{email}` — счётчик попыток ввода кода, max 5, TTL 600 сек
+- `event_reg_send_count:{email}` — счётчик отправок кодов, max 3, TTL 600 сек
+
+---
+
+#### POST /api/v1/events/{event_id}/confirm-guest-registration
+
+> ✅ **РЕАЛИЗОВАН.** Новый эндпоинт для подтверждения кода верификации (сценарий 3).
+
+**Назначение:** Подтверждение email нового гостя по коду, создание временного аккаунта, регистрация и оплата  
+**Доступ:** Public (без JWT)
+
+**Request body:**
+```json
+{
+  "email": "string (required, EmailStr)",
+  "code": "string (required, 6 символов)",
   "tariff_id": "uuid (required)",
-  "email": "string (required)",
-  "full_name": "string (required)",
-  "workplace": "string (optional)",
-  "specialization": "string (optional)",
-  "idempotency_key": "string (required)"
+  "idempotency_key": "string (required, max 255)",
+  "guest_full_name": "string (optional, max 300)",
+  "guest_workplace": "string (optional, max 255)",
+  "guest_specialization": "string (optional, max 255)",
+  "fiscal_email": "string (optional, EmailStr)"
 }
 ```
 
@@ -2159,73 +2224,45 @@ app/
 ```json
 {
   "registration_id": "uuid",
-  "payment_id": "uuid",
-  "payment_url": "https://pay.example.com/...",
-  "applied_price": 10000.00,
-  "is_member_price": true
-}
-```
-
-**Response 422:**
-```json
-{
-  "error": {
-    "code": "NO_SEATS_AVAILABLE",
-    "message": "Места по выбранному тарифу закончились"
-  }
-}
-```
-
-**Бизнес-логика:**
-1. Проверить seats_available > 0
-2. Определить цену:
-   - Авторизован + doctor + approved + active subscription → `member_price`
-   - Всё остальное → `price`
-3. Если Guest:
-   - Проверить email → если уже есть user, вернуть ошибку AUTH_REQUIRED
-   - Создать user с временным паролем, добавить роль `non_doctor`
-   - Отправить email с временным паролем
-4. Создать `event_registrations` со status=`pending`
-5. Создать `payments` (product_type=`event`, payment_provider по конфигурации)
-6. Вызвать API платёжной системы → получить payment_url
-7. Idempotency_key: если уже есть — вернуть существующий payment
-8. Чек будет сформирован при успешной оплате (product_type = 'event' → фискализация обязательна)
-
----
-
-#### GET /api/v1/events/{event_id}/check-price
-
-**Назначение:** Проверка доступной цены для текущего пользователя  
-**Доступ:** Guest / Авторизованный
-
-**Query params:** `tariff_id` (required)
-
-**Response 200:**
-```json
-{
-  "tariff_id": "uuid",
-  "regular_price": 15000.00,
-  "member_price": 10000.00,
+  "payment_url": "https://yookassa.ru/...",
   "applied_price": 15000.00,
   "is_member_price": false,
-  "reason": "Для получения льготной цены необходима активная подписка",
-  "can_get_member_price": false,
-  "requirements": {
-    "authenticated": false,
-    "approved": false,
-    "active_subscription": false
-  }
+  "action": null,
+  "masked_email": null
 }
 ```
 
+**Ошибки:**
+- 422 `Invalid verification code` — неверный код (counter +1)
+- 422 `Verification code expired` — код не найден / истёк
+- 422 `Too many attempts` — 5 неудачных попыток, запросите новый код
+- 422 `NO_SEATS_AVAILABLE` — мест нет
+- 404 tariff/event not found
+
+**Бизнес-логика:**
+1. Получить сохранённые данные из Redis (`event_reg_verify:{email}`)
+2. Проверить код, инкрементировать счётчик попыток
+3. Создать `users` с ролью `non_doctor` и временным паролем
+4. Создать `event_registrations` (status=pending)
+5. Создать `payments` (product_type=event)
+6. Вызвать YooKassa API → payment_url
+7. Отправить email с временным паролем и инструкциями
+8. Удалить Redis-ключи верификации
+
 ---
 
-#### GET /api/v1/events/{event_id}/galleries/{gallery_id}/photos
+#### ~~GET /api/v1/events/{event_id}/check-price~~
 
-**Назначение:** Фотографии галереи мероприятия  
-**Доступ:** Guest (public) / Doctor с подпиской (members_only)
+> **NOT IMPLEMENTED.** Фронт показывает обе цены (`price` и `member_price`) из данных тарифа. Бекенд определяет `applied_price` при создании регистрации.
 
-**Query params:** limit, offset
+---
+
+#### GET /api/v1/events/{event_id}/galleries
+
+> **ОБНОВЛЕНО.** Фактический endpoint возвращает все галереи с фотографиями inline (нет отдельного `/{gallery_id}/photos`).
+
+**Назначение:** Список галерей мероприятия с фотографиями  
+**Доступ:** Guest (public) / Doctor с подпиской или подтверждённой регистрацией (members_only)
 
 **Response 200:**
 ```json
@@ -2233,34 +2270,49 @@ app/
   "data": [
     {
       "id": "uuid",
-      "file_url": "https://...",
-      "thumbnail_url": "https://...",
-      "caption": "Открытие конференции"
+      "title": "Открытие конференции",
+      "access_level": "public",
+      "photos": [
+        {
+          "id": "uuid",
+          "file_url": "https://...",
+          "thumbnail_url": "https://...",
+          "caption": "Фото 1"
+        }
+      ]
     }
-  ],
-  "total": ..., "limit": 20, "offset": 0
+  ]
 }
 ```
 
-**Response 403:** если members_only и нет активной подписки
+**Логика доступа:** Галереи с `access_level = "members_only"` скрываются от гостей и пользователей без активной подписки/подтверждённой регистрации.
 
 ---
 
-#### GET /api/v1/events/{event_id}/recordings/{recording_id}
+#### GET /api/v1/events/{event_id}/recordings
 
-**Назначение:** Получение записи конференции с playback URL  
-**Доступ:** Зависит от access_level
+> **ОБНОВЛЕНО.** Фактический endpoint возвращает список записей (нет отдельного `/{recording_id}`).
+
+**Назначение:** Список записей конференции  
+**Доступ:** Зависит от access_level каждой записи
 
 **Response 200:**
 ```json
 {
-  "id": "uuid",
-  "title": "Доклад: Современные методы",
-  "video_source": "uploaded",
-  "video_playback_url": "https://presigned-s3-url...",
-  "duration_seconds": 3600
+  "data": [
+    {
+      "id": "uuid",
+      "title": "Доклад: Современные методы",
+      "video_source": "uploaded",
+      "video_url": "https://...",
+      "duration_seconds": 3600,
+      "access_level": "public"
+    }
+  ]
 }
 ```
+
+**Логика доступа:** Записи с `access_level` = `"members_only"` или `"participants_only"` скрываются от пользователей без активной подписки или подтверждённой регистрации. Только опубликованные записи (`status = "published"`) возвращаются.
 
 > `video_playback_url` — единое поле для фронтенда. Backend формирует его автоматически:
 > - Если `video_source = external` → значение = `video_url` (прямая ссылка на YouTube/VK/Rutube)
@@ -2701,6 +2753,8 @@ app/
 
 ### CONTENT BLOCKS
 
+> **NOT IMPLEMENTED** — CRUD-эндпоинты для Content Blocks **не реализованы** на бекенде. Модель `ContentBlock` существует в БД, но API отсутствует. Спецификация сохранена для будущей реализации.
+
 Универсальные контентные блоки для статей, мероприятий, профилей врачей, документов организации. Полиморфная связь через `entity_type` + `entity_id`.
 
 #### GET /api/v1/admin/content-blocks
@@ -2756,14 +2810,35 @@ app/
 
 ---
 
-#### GET /api/v1/admin/pages-seo
+#### GET /api/v1/admin/seo-pages
 
 **Назначение:** Список всех SEO-настроек  
 **Доступ:** Admin
 
 ---
 
-#### PATCH /api/v1/admin/pages-seo/{slug}
+#### GET /api/v1/admin/seo-pages/{slug}
+
+**Назначение:** Получение SEO-настройки по slug  
+**Доступ:** Admin
+
+---
+
+#### POST /api/v1/admin/seo-pages
+
+**Назначение:** Создание SEO-настройки для новой страницы  
+**Доступ:** Admin
+
+---
+
+#### DELETE /api/v1/admin/seo-pages/{slug}
+
+**Назначение:** Удаление SEO-настройки  
+**Доступ:** Admin
+
+---
+
+#### PATCH /api/v1/admin/seo-pages/{slug}
 
 **Назначение:** Обновление SEO-полей страницы (upsert по slug)  
 **Доступ:** Admin
@@ -2781,46 +2856,24 @@ app/
 
 ---
 
-#### GET /api/v1/pages-seo/{slug}
+#### GET /api/v1/seo/{slug}
 
 **Назначение:** Получение SEO-данных для страницы  
 **Доступ:** Guest
 
-**Управление в админке:** `/admin/settings/seo` (GET/PUT /admin/pages-seo)
+**Управление в админке:** `/admin/settings/seo` (GET/PATCH /admin/seo-pages)
 
 ---
 
-#### GET /api/v1/settings/public
+#### ~~GET /api/v1/settings/public~~
 
-**Назначение:** Публичные настройки — контакты, ссылка на бота. Без авторизации.  
-**Доступ:** Guest
-
-**Response 200:**
-```json
-{
-  "telegram_bot_link": "https://t.me/trichology_bot",
-  "contacts_for_visitors": { "email": "...", "phone": "...", "address": "..." }
-}
-```
-
-**Управление в админке:** `/admin/settings` (GET/PUT /admin/settings)
+> **NOT IMPLEMENTED.** Публичный эндпоинт для контактов и ссылки на бота не реализован. Фронт использует env-переменные (`NEXT_PUBLIC_CONTACT_EMAIL`, и т.д.) как workaround.
 
 ---
 
-#### GET /api/v1/pages/home
+#### ~~GET /api/v1/pages/home~~
 
-**Назначение:** Контент главной страницы — hero-блок, миссия. Из `site_settings` (ключи `home_hero`, `home_mission`).  
-**Доступ:** Guest
-
-**Response 200:**
-```json
-{
-  "hero": { "title": "...", "text": "...", "image_url": "..." },
-  "mission": { "text": "..." }
-}
-```
-
-**Управление в админке:** `/admin/settings` — расширить форму «Общие настройки» секциями Hero и Миссия (GET/PUT /admin/settings)
+> **NOT IMPLEMENTED.** CMS-эндпоинт для главной страницы не реализован. Контент hero-блока и миссии захардкоден на фронте.
 
 ---
 
@@ -3208,7 +3261,7 @@ app/
 
 ---
 
-#### GET /api/v1/admin/voting-sessions
+#### GET /api/v1/admin/voting
 
 **Назначение:** Список сессий голосования для админки  
 **Доступ:** Admin
@@ -3219,7 +3272,7 @@ app/
 
 ---
 
-#### POST /api/v1/admin/voting-sessions
+#### POST /api/v1/admin/voting
 
 **Назначение:** Создание сессии голосования  
 **Доступ:** Admin
@@ -3259,7 +3312,7 @@ app/
 
 ---
 
-#### PATCH /api/v1/admin/voting-sessions/{session_id}
+#### PATCH /api/v1/admin/voting/{session_id}
 
 **Назначение:** Обновление / активация / закрытие сессии  
 **Доступ:** Admin
@@ -3280,7 +3333,7 @@ app/
 
 ---
 
-#### GET /api/v1/voting-sessions/active
+#### GET /api/v1/voting/active
 
 **Назначение:** Получение текущего активного голосования  
 **Доступ:** Doctor (с активной подпиской)
@@ -3309,7 +3362,7 @@ app/
 
 ---
 
-#### POST /api/v1/voting-sessions/{session_id}/vote
+#### POST /api/v1/voting/{session_id}/vote
 
 **Назначение:** Голосование за кандидата  
 **Доступ:** Doctor (с активной подпиской, не голосовал ранее)
@@ -3348,7 +3401,7 @@ app/
 
 ---
 
-#### GET /api/v1/admin/voting-sessions/{session_id}/results
+#### GET /api/v1/admin/voting/{session_id}/results
 
 **Назначение:** Результаты голосования  
 **Доступ:** Admin (всегда), Doctor (только после `closed`)
@@ -3386,7 +3439,9 @@ app/
 
 ---
 
-#### GET /api/v1/seo/sitemap.xml
+#### GET /sitemap.xml
+
+> **ОБНОВЛЕНО.** Фактический URL: `/sitemap.xml` (не `/api/v1/seo/sitemap.xml`).
 
 **Назначение:** Автоматически генерируемый Sitemap  
 **Доступ:** Guest
@@ -3418,7 +3473,9 @@ app/
 
 ---
 
-#### GET /api/v1/seo/robots.txt
+#### GET /robots.txt
+
+> **ОБНОВЛЕНО.** Фактический URL: `/robots.txt` (не `/api/v1/seo/robots.txt`).
 
 **Назначение:** robots.txt  
 **Доступ:** Guest
@@ -3438,7 +3495,7 @@ Allow: /
 Sitemap: https://[DOMAIN]/sitemap.xml
 ```
 
-**Бизнес-логика:** Статический файл, обслуживается через `/api/v1/seo/robots.txt` или напрямую как `/robots.txt` через Next.js `app/robots.ts`.
+**Бизнес-логика:** Обслуживается бекендом напрямую как `/robots.txt`. Фронт (Next.js) может также генерировать через `app/robots.ts`.
 
 ---
 
@@ -3579,35 +3636,52 @@ Sitemap: https://[DOMAIN]/sitemap.xml
    c. Врач может подать новые правки
 ```
 
-### 3.5 Flow регистрации на мероприятие
+### 3.5 Flow регистрации на мероприятие (3 сценария)
+
+> **Актуализировано.** Flow переписан с учётом реализованной верификации email для гостей.
 
 ```
-1. Пользователь выбирает тариф на странице мероприятия
-2. GET /api/v1/events/{id}/check-price?tariff_id=uuid
-   → Определить applied_price:
-     IF authenticated AND doctor AND approved AND active_subscription
-       → member_price
-     ELSE
-       → price
-3. POST /api/v1/events/{id}/register
-   { tariff_id, idempotency_key, [email, full_name — если guest] }
-4. Backend:
-   a. Проверить seats_available > 0 (SELECT ... FOR UPDATE для атомарности)
-   b. Если guest:
-      - Проверить email не занят (409 AUTH_REQUIRED если да)
-      - Создать users + user_roles(non_doctor)
-      - Сгенерировать временный пароль
-   c. Определить цену (повторно, серверная проверка)
-   d. Проверить idempotency_key
-   e. Создать event_registrations (status=pending)
-   f. Создать payment (type=event)
-   g. Вызвать PSB API → payment_url
-5. Webhook:
-   a. payment.status → completed
-   b. event_registration.status → confirmed
-   c. Инкремент seats_taken (через триггер)
-   d. Уведомить пользователя: "Регистрация подтверждена"
-   e. Если guest → отправить временный пароль
+СЦЕНАРИЙ 1 — АВТОРИЗОВАННЫЙ (JWT):
+1. POST /events/{id}/register { tariff_id, idempotency_key } + JWT
+2. Backend:
+   a. SELECT FOR UPDATE seats → проверить seats_available > 0
+   b. Определить цену: doctor + approved + active_subscription → member_price, иначе → price
+   c. Создать event_registration (status=pending)
+   d. Создать payment → YooKassa API → payment_url
+3. Response: { registration_id, payment_url, applied_price, action: null }
+4. Фронт → redirect на payment_url
+
+СЦЕНАРИЙ 2 — ГОСТЬ, EMAIL УЖЕ В БАЗЕ:
+1. POST /events/{id}/register { tariff_id, idempotency_key, guest_email: "existing@..." }
+2. Backend: находит user по email
+3. Response: { action: "verify_existing", masked_email: "e***@..." }
+4. Фронт → показывает форму ввода пароля
+5. POST /auth/login { email, password } → получить JWT
+6. Повторить СЦЕНАРИЙ 1 с JWT
+
+СЦЕНАРИЙ 3 — ГОСТЬ, EMAIL НОВЫЙ:
+1. POST /events/{id}/register { tariff_id, idempotency_key, guest_email: "new@..." }
+2. Backend:
+   a. Генерирует 6-значный код
+   b. Сохраняет в Redis: event_reg_verify:{email} (TTL 600s)
+   c. Инкрементирует event_reg_send_count:{email} (max 3 / 600s)
+   d. Отправляет код на email (TaskIQ задача)
+3. Response: { action: "verify_new_email", masked_email: "n***@..." }
+4. Фронт → показывает форму ввода 6-значного кода
+5. POST /events/{id}/confirm-guest-registration { email, code, tariff_id, idempotency_key, ... }
+6. Backend:
+   a. Проверяет код (max 5 попыток через event_reg_attempts:{email})
+   b. Создаёт users + user_roles(non_doctor) с временным паролем
+   c. Создаёт event_registration + payment → YooKassa → payment_url
+   d. Отправляет email с временным паролем
+7. Фронт → redirect на payment_url
+
+WEBHOOK (для всех сценариев):
+1. YooKassa webhook → POST /api/v1/payment/webhook
+2. payment.status → completed
+3. event_registration.status → confirmed
+4. Atomic: UPDATE events SET seats_taken = seats_taken + 1
+5. Уведомить пользователя: "Регистрация подтверждена"
 ```
 
 ### 3.6 Автоматическая деактивация при просрочке подписки
@@ -3696,6 +3770,8 @@ TaskIQ Scheduler задача: check_expired_subscriptions
 | POST /auth/verify-email            | 10/мин                   | IP                    |
 | POST /subscriptions/pay            | 3/мин                    | user_id               |
 | POST /events/*/register            | 5/мин                    | user_id или IP        |
+| POST /events/*/register (отправка кода) | 3 / 10 мин            | email (Redis: `event_reg_send_count:{email}`) |
+| POST /events/*/confirm-guest-registration (ввод кода) | 5 попыток / код | email (Redis: `event_reg_attempts:{email}`) |
 | POST /*/upload (файлы)             | 10/мин                   | user_id               |
 | POST /telegram/webhook             | 100/мин                  | IP (Telegram servers) |
 | GET /* (публичные)                 | 60/мин                   | IP                    |
