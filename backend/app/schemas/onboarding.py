@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChooseRoleRequest(BaseModel):
@@ -34,6 +34,21 @@ class OnboardingStatusResponse(BaseModel):
     submitted_at: datetime | None = None
     rejection_comment: str | None = None
     next_step: str
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email_verified": True,
+            "role_chosen": True,
+            "role": "doctor",
+            "profile_filled": True,
+            "documents_uploaded": True,
+            "has_medical_diploma": True,
+            "moderation_status": "pending_review",
+            "submitted_at": "2026-03-10T12:00:00Z",
+            "rejection_comment": None,
+            "next_step": "wait_moderation",
+        }
+    })
 
 
 class OnboardingStepResponse(BaseModel):

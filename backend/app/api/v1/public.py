@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import get_optional_user_id
+from app.core.openapi import error_responses
 from app.core.pagination import PaginatedResponse
 from app.core.redis import get_redis
 from app.schemas.event_registration import (
@@ -18,11 +19,16 @@ from app.schemas.event_registration import (
 from app.schemas.public import (
     ArticleDetailResponse,
     ArticleListItem,
+    ArticleThemeListResponse,
     DoctorPublicDetailResponse,
     DoctorPublicListItem,
     EventPublicDetailResponse,
     EventPublicListItem,
+    GalleryListResponse,
+    OrgDocPublicListResponse,
+    RecordingListResponse,
 )
+from app.schemas.seo import SeoPageResponse
 from app.services.public_service import PublicService
 
 router = APIRouter()
@@ -30,29 +36,40 @@ router = APIRouter()
 
 # ── Cities ────────────────────────────────────────────────────────
 
-@router.get("/cities")
+@router.get(
+    "/cities",
+    response_model=dict,
+    summary="Список городов",
+)
 async def list_cities(
-    with_doctors: bool = Query(False),
+    with_doctors: bool = Query(False, description="Если true — только города с врачами, с подсчётом"),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> dict:
+    """Возвращает список городов. С `with_doctors=true` дополнительно
+    считает количество активных врачей в каждом городе."""
     svc = PublicService(db, redis)
     return await svc.list_cities(with_doctors=with_doctors)
 
 
 # ── Doctors (public catalog) ─────────────────────────────────────
 
-@router.get("/doctors", response_model=PaginatedResponse[DoctorPublicListItem])
+@router.get(
+    "/doctors",
+    response_model=PaginatedResponse[DoctorPublicListItem],
+    summary="Каталог врачей",
+)
 async def list_doctors(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
     limit: int = Query(12, ge=1, le=50),
     offset: int = Query(0, ge=0),
-    city_id: UUID | None = Query(None),
-    city_slug: str | None = Query(None),
+    city_id: UUID | None = Query(None, description="Фильтр по UUID города"),
+    city_slug: str | None = Query(None, description="Фильтр по slug города"),
     specialization: str | None = Query(None),
-    search: str | None = Query(None, min_length=2),
+    search: str | None = Query(None, min_length=2, description="Поиск по ФИО (мин. 2 символа)"),
 ) -> dict:
+    """Пагинированный список активных врачей с фильтрацией."""
     svc = PublicService(db, redis)
     return await svc.list_doctors(
         limit=limit,
@@ -64,41 +81,70 @@ async def list_doctors(
     )
 
 
-@router.get("/doctors/{profile_id}", response_model=DoctorPublicDetailResponse)
+@router.get(
+    "/doctors/{profile_id}",
+    response_model=DoctorPublicDetailResponse,
+    summary="Профиль врача",
+    responses=error_responses(404),
+)
 async def get_doctor(
     profile_id: UUID,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> DoctorPublicDetailResponse:
+    """Детальная карточка врача по UUID.
+
+    - **404** — врач не найден или неактивен
+    """
     svc = PublicService(db, redis)
     return await svc.get_doctor(profile_id)
 
 
 # ── Events ────────────────────────────────────────────────────────
 
-@router.get("/events", response_model=PaginatedResponse[EventPublicListItem])
+@router.get(
+    "/events",
+    response_model=PaginatedResponse[EventPublicListItem],
+    summary="Список мероприятий",
+)
 async def list_events(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    period: str = Query("upcoming"),
+    period: str = Query("upcoming", description="upcoming | past | all"),
 ) -> dict:
+    """Пагинированный список мероприятий с фильтром по периоду."""
     svc = PublicService(db, redis)
     return await svc.list_events(limit=limit, offset=offset, period=period)
 
 
-@router.get("/events/{slug}", response_model=EventPublicDetailResponse)
+@router.get(
+    "/events/{slug}",
+    response_model=EventPublicDetailResponse,
+    summary="Детали мероприятия",
+    responses=error_responses(404),
+)
 async def get_event(
     slug: str,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> EventPublicDetailResponse:
+    """Полная информация о мероприятии по slug, включая тарифы, галереи и записи.
+
+    - **404** — мероприятие не найдено
+    """
     svc = PublicService(db, redis)
     return await svc.get_event(slug)
 
 
-@router.post("/events/{event_id}/register", response_model=RegisterForEventResponse, status_code=201)
+@router.post(
+    "/events/{event_id}/register",
+    response_model=RegisterForEventResponse,
+    status_code=201,
+    summary="Регистрация на мероприятие",
+    responses=error_responses(404, 409, 422, 429),
+)
 async def register_for_event(
     event_id: UUID,
     body: RegisterForEventRequest,
@@ -106,6 +152,16 @@ async def register_for_event(
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
     user_id: UUID | None = Depends(get_optional_user_id),
 ) -> RegisterForEventResponse:
+    """Регистрирует пользователя на мероприятие. Три сценария:
+
+    1. **Авторизованный пользователь** → создаёт регистрацию и платёж, возвращает `payment_url`
+    2. **Гость с существующим аккаунтом** → `action="login_required"`, `masked_email="m***@mail.ru"`
+    3. **Новый гость** → `action="verification_required"`, отправляет код на email
+
+    - **404** — мероприятие или тариф не найдены
+    - **409** — уже зарегистрирован, нет мест, мероприятие закрыто
+    - **429** — слишком много отправок кода (макс. 3 за 10 мин)
+    """
     from app.services.event_registration_service import EventRegistrationService
 
     svc = EventRegistrationService(db, redis)
@@ -116,6 +172,8 @@ async def register_for_event(
     "/events/{event_id}/confirm-guest-registration",
     response_model=RegisterForEventResponse,
     status_code=201,
+    summary="Подтверждение гостевой регистрации",
+    responses=error_responses(404, 409, 422, 429),
 )
 async def confirm_guest_registration(
     event_id: UUID,
@@ -123,6 +181,13 @@ async def confirm_guest_registration(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> RegisterForEventResponse:
+    """Подтверждает email гостя 6-значным кодом и создаёт регистрацию + платёж.
+    Возвращает `payment_url` для оплаты.
+
+    - **404** — мероприятие/тариф не найден, код не найден/истёк
+    - **409** — неверный код (макс. 5 попыток), нет мест
+    - **429** — превышен лимит попыток ввода кода
+    """
     from app.services.event_registration_service import EventRegistrationService
 
     svc = EventRegistrationService(db, redis)
@@ -131,12 +196,22 @@ async def confirm_guest_registration(
 
 # ── Event Galleries (D18) ────────────────────────────────────────
 
-@router.get("/events/{event_id}/galleries")
+@router.get(
+    "/events/{event_id}/galleries",
+    response_model=GalleryListResponse,
+    summary="Галереи мероприятия",
+    responses=error_responses(404),
+)
 async def list_event_galleries(
     event_id: UUID,
     db: AsyncSession = Depends(get_db_session),
     user_id: UUID | None = Depends(get_optional_user_id),
 ) -> dict:
+    """Список галерей с фотографиями. Галереи с `access_level=members_only`
+    видны только участникам (с подпиской или подтверждённой регистрацией).
+
+    - **404** — мероприятие не найдено
+    """
     from sqlalchemy import select
 
     from app.models.events import Event, EventGallery, EventGalleryPhoto, EventRegistration
@@ -187,12 +262,22 @@ async def list_event_galleries(
     return {"data": items}
 
 
-@router.get("/events/{event_id}/recordings")
+@router.get(
+    "/events/{event_id}/recordings",
+    response_model=RecordingListResponse,
+    summary="Записи мероприятия",
+    responses=error_responses(404),
+)
 async def list_event_recordings(
     event_id: UUID,
     db: AsyncSession = Depends(get_db_session),
     user_id: UUID | None = Depends(get_optional_user_id),
 ) -> dict:
+    """Список видеозаписей мероприятия. Записи с `access_level` members_only/participants_only
+    видны только при наличии активной подписки или подтверждённой регистрации.
+
+    - **404** — мероприятие не найдено
+    """
     from sqlalchemy import select
 
     from app.models.events import Event, EventRecording, EventRegistration
@@ -243,48 +328,72 @@ async def list_event_recordings(
 
 # ── Articles ──────────────────────────────────────────────────────
 
-@router.get("/articles", response_model=PaginatedResponse[ArticleListItem])
+@router.get(
+    "/articles",
+    response_model=PaginatedResponse[ArticleListItem],
+    summary="Список статей",
+)
 async def list_articles(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    theme_slug: str | None = Query(None),
-    search: str | None = Query(None, min_length=2),
+    theme_slug: str | None = Query(None, description="Фильтр по slug темы"),
+    search: str | None = Query(None, min_length=2, description="Полнотекстовый поиск"),
 ) -> dict:
+    """Пагинированный список опубликованных статей."""
     svc = PublicService(db, redis)
     return await svc.list_articles(
         limit=limit, offset=offset, theme_slug=theme_slug, search=search
     )
 
 
-@router.get("/article-themes")
+@router.get(
+    "/article-themes",
+    response_model=ArticleThemeListResponse,
+    summary="Список тем статей",
+)
 async def list_article_themes(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-    active: bool | None = Query(None),
-    has_articles: bool | None = Query(None),
+    active: bool | None = Query(None, description="Фильтр по активности"),
+    has_articles: bool | None = Query(None, description="Только темы со статьями"),
 ) -> dict:
+    """Список тем для фильтрации статей."""
     svc = PublicService(db, redis)
     return await svc.list_article_themes(active=active, has_articles=has_articles)
 
 
-@router.get("/articles/{slug}", response_model=ArticleDetailResponse)
+@router.get(
+    "/articles/{slug}",
+    response_model=ArticleDetailResponse,
+    summary="Статья по slug",
+    responses=error_responses(404),
+)
 async def get_article(
     slug: str,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> ArticleDetailResponse:
+    """Полный текст статьи с метаданными и SEO.
+
+    - **404** — статья не найдена
+    """
     svc = PublicService(db, redis)
     return await svc.get_article(slug)
 
 
 # ── Organization documents ───────────────────────────────────────
 
-@router.get("/organization-documents")
+@router.get(
+    "/organization-documents",
+    response_model=OrgDocPublicListResponse,
+    summary="Документы организации",
+)
 async def list_organization_documents(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
+    """Список активных документов организации (устав, положения и т.д.)."""
     from sqlalchemy import select
 
     from app.models.content import OrganizationDocument
@@ -311,11 +420,20 @@ async def list_organization_documents(
 
 # ── SEO (for frontend SSR) ──────────────────────────────────────
 
-@router.get("/seo/{slug}")
+@router.get(
+    "/seo/{slug}",
+    response_model=SeoPageResponse,
+    summary="SEO-метаданные страницы",
+    responses=error_responses(404),
+)
 async def get_seo_page(
     slug: str,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
+    """Возвращает SEO-метатеги для указанной страницы по slug.
+
+    - **404** — SEO-страница не найдена
+    """
     from app.services.seo_service import SeoService
 
     svc = SeoService(db)

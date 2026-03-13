@@ -1,6 +1,6 @@
 """Pydantic schemas for authentication endpoints."""
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -23,6 +23,13 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "token_type": "bearer",
+        }
+    })
 
 
 class VerifyEmailRequest(BaseModel):

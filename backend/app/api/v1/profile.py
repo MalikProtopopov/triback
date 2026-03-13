@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import get_current_user_id
+from app.core.openapi import error_responses
 from app.schemas.auth import MessageResponse
-from app.schemas.event_registration import MyEventListItem
+from app.schemas.event_registration import MyEventListItem, MyEventsPaginatedResponse
 from app.schemas.profile import (
     DiplomaPhotoResponse,
     DocumentNested,
@@ -23,11 +24,21 @@ from app.services.profile_service import ProfileService
 router = APIRouter(prefix="/profile")
 
 
-@router.get("/personal", response_model=PersonalProfileResponse)
+@router.get(
+    "/personal",
+    response_model=PersonalProfileResponse,
+    summary="Личные данные",
+    responses=error_responses(401, 404),
+)
 async def get_personal(
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> PersonalProfileResponse:
+    """Возвращает личные (непубличные) данные профиля врача.
+
+    - **401** — не авторизован
+    - **404** — профиль ещё не создан
+    """
     svc = ProfileService(db)
     profile = await svc.get_personal(user_id)
 
@@ -62,24 +73,44 @@ async def get_personal(
     )
 
 
-@router.patch("/personal", response_model=MessageResponse)
+@router.patch(
+    "/personal",
+    response_model=MessageResponse,
+    summary="Обновить личные данные",
+    responses=error_responses(401, 404, 422),
+)
 async def update_personal(
     data: PersonalProfileUpdate,
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
+    """Обновляет личные данные профиля. Можно отправлять только изменённые поля.
+
+    - **401** — не авторизован
+    - **404** — профиль не найден
+    """
     svc = ProfileService(db)
     update_data = data.model_dump(exclude_unset=True)
     await svc.update_personal(user_id, update_data)
     return MessageResponse(message="Данные обновлены")
 
 
-@router.post("/diploma-photo", response_model=DiplomaPhotoResponse, status_code=201)
+@router.post(
+    "/diploma-photo",
+    response_model=DiplomaPhotoResponse,
+    status_code=201,
+    summary="Загрузка фото диплома",
+    responses=error_responses(401, 422),
+)
 async def upload_diploma_photo(
     file: UploadFile = File(...),
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> DiplomaPhotoResponse:
+    """Загружает фото диплома в S3 и сохраняет URL в профиле.
+
+    - **401** — не авторизован
+    """
     svc = ProfileService(db)
     s3_key = await svc.upload_diploma_photo(user_id, file)
     return DiplomaPhotoResponse(
@@ -88,34 +119,64 @@ async def upload_diploma_photo(
     )
 
 
-@router.get("/public", response_model=PublicProfileResponse)
+@router.get(
+    "/public",
+    response_model=PublicProfileResponse,
+    summary="Публичный профиль",
+    responses=error_responses(401, 404),
+)
 async def get_public(
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> PublicProfileResponse:
+    """Данные публичного профиля врача (видимые в каталоге).
+
+    - **401** — не авторизован
+    - **404** — профиль не найден
+    """
     svc = ProfileService(db)
     result = await svc.get_public(user_id)
     return PublicProfileResponse(**result)
 
 
-@router.patch("/public", response_model=MessageResponse)
+@router.patch(
+    "/public",
+    response_model=MessageResponse,
+    summary="Обновить публичный профиль",
+    responses=error_responses(401, 404, 422),
+)
 async def update_public(
     data: PublicProfileUpdate,
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
+    """Обновляет публичные данные. Изменения отправляются на модерацию.
+
+    - **401** — не авторизован
+    - **404** — профиль не найден
+    """
     svc = ProfileService(db)
     update_data = data.model_dump(exclude_unset=True)
     await svc.update_public(user_id, update_data)
     return MessageResponse(message="Изменения отправлены на модерацию")
 
 
-@router.post("/photo", response_model=PhotoUploadResponse, status_code=201)
+@router.post(
+    "/photo",
+    response_model=PhotoUploadResponse,
+    status_code=201,
+    summary="Загрузка фото профиля",
+    responses=error_responses(401, 422),
+)
 async def upload_photo(
     file: UploadFile = File(...),
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> PhotoUploadResponse:
+    """Загружает фото профиля врача в S3.
+
+    - **401** — не авторизован
+    """
     svc = ProfileService(db)
     s3_key = await svc.upload_photo(user_id, file)
     return PhotoUploadResponse(
@@ -126,13 +187,22 @@ async def upload_photo(
 
 # ── D17: My events ──────────────────────────────────────────────
 
-@router.get("/events", response_model=dict)
+@router.get(
+    "/events",
+    response_model=MyEventsPaginatedResponse,
+    summary="Мои мероприятия",
+    responses=error_responses(401),
+)
 async def list_my_events(
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict:
+    """Список мероприятий, на которые пользователь зарегистрирован (confirmed).
+
+    - **401** — не авторизован
+    """
     from sqlalchemy import func, select
 
     from app.models.events import Event, EventRegistration

@@ -1,7 +1,32 @@
 """Custom HTTP exceptions and RFC 7807 error format."""
 
+from typing import Any
+
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: dict[str, Any] = {}
+
+
+class ErrorResponse(BaseModel):
+    """Standard error envelope returned by all error handlers."""
+
+    error: ErrorDetail
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "error": {
+                "code": "NOT_FOUND",
+                "message": "Resource not found",
+                "details": {},
+            }
+        }
+    })
 
 
 class AppError(HTTPException):

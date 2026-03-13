@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
+from app.core.openapi import error_responses
 from app.core.security import require_role
 from app.models.events import Event
 from app.models.profiles import DoctorProfile
@@ -31,11 +32,22 @@ class DashboardResponse(BaseModel):
     moderation_queue: int
 
 
-@router.get("/dashboard", response_model=DashboardResponse)
+@router.get(
+    "/dashboard",
+    response_model=DashboardResponse,
+    summary="Сводная статистика",
+    responses=error_responses(401, 403),
+)
 async def get_dashboard(
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
+    """Агрегированные метрики платформы: пользователи, подписки, платежи,
+    мероприятия, очередь модерации.
+
+    - **401** — не авторизован
+    - **403** — роль не admin/manager
+    """
     now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)

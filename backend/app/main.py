@@ -76,19 +76,124 @@ def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRespons
     )
 
 
+_API_DESCRIPTION = """\
+Backend API для платформы «Ассоциация трихологов».
+
+## Авторизация
+
+Большинство эндпоинтов требуют JWT-токен в заголовке:
+```
+Authorization: Bearer <access_token>
+```
+Токен получается через `POST /api/v1/auth/login`. Время жизни — 15 минут.
+Обновление — через `POST /api/v1/auth/refresh` (refresh token в httpOnly cookie).
+
+## Формат ошибок
+
+Все ошибки возвращаются в едином формате:
+```json
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Ресурс не найден",
+    "details": {}
+  }
+}
+```
+
+| HTTP-код | code | Описание |
+|----------|------|----------|
+| 401 | `UNAUTHORIZED` | JWT отсутствует или невалиден |
+| 403 | `FORBIDDEN` | Недостаточно прав (роль не подходит) |
+| 404 | `NOT_FOUND` | Ресурс не найден |
+| 409 | `CONFLICT` | Конфликт данных (дубликат email и т.д.) |
+| 422 | `VALIDATION_ERROR` | Ошибка валидации запроса |
+| 429 | `RATE_LIMITED` | Слишком много запросов |
+
+## Пагинация
+
+Списковые эндпоинты возвращают:
+```json
+{
+  "data": [...],
+  "total": 42,
+  "limit": 20,
+  "offset": 0
+}
+```
+Query-параметры: `limit` (1-100, default 20), `offset` (>=0, default 0).
+"""
+
+_OPENAPI_TAGS = [
+    {"name": "Auth", "description": "Регистрация, логин, JWT-токены, смена пароля и email"},
+    {"name": "Onboarding", "description": "Выбор роли, заполнение анкеты врача, загрузка документов, отправка на модерацию"},
+    {"name": "Profile", "description": "Личный кабинет: личные и публичные данные врача, фото, документы"},
+    {"name": "Subscriptions", "description": "Оплата членских взносов, статус подписки, история платежей, чеки"},
+    {"name": "Certificates", "description": "Сертификаты членства и участия в мероприятиях"},
+    {"name": "Public", "description": "Публичные эндпоинты без авторизации: врачи, мероприятия, статьи, регистрация на мероприятие"},
+    {"name": "Voting", "description": "Голосование за президента ассоциации (для врачей с подпиской)"},
+    {"name": "Telegram", "description": "Привязка Telegram-аккаунта, генерация кода, webhook бота"},
+    {"name": "Admin - Events", "description": "Управление мероприятиями: CRUD, тарифы, галереи, записи, регистрации"},
+    {"name": "Admin - Content", "description": "Управление контентом: статьи, темы статей, документы организации"},
+    {"name": "Admin - Settings", "description": "Общие настройки сайта, города, тарифные планы подписки"},
+    {"name": "Admin - Doctors", "description": "Управление врачами: список, модерация, импорт Excel, пользователи портала"},
+    {"name": "Admin - Payments", "description": "Список всех платежей, ручное создание платежей"},
+    {"name": "Admin - Dashboard", "description": "Сводная статистика: пользователи, подписки, платежи, мероприятия"},
+    {"name": "Admin - Notifications", "description": "Отправка уведомлений пользователям, журнал уведомлений"},
+    {"name": "Admin - SEO", "description": "Управление SEO-метаданными страниц"},
+    {"name": "Webhooks", "description": "Внутренние webhook-эндпоинты (YooKassa). Не вызывать напрямую."},
+    {"name": "System", "description": "Служебные эндпоинты: health check"},
+]
+
+
+def _validation_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    from fastapi.exceptions import RequestValidationError
+
+    assert isinstance(exc, RequestValidationError)
+    errors = []
+    for err in exc.errors():
+        clean = {
+            "type": err.get("type", ""),
+            "loc": list(err.get("loc", [])),
+            "msg": err.get("msg", ""),
+        }
+        if "input" in err:
+            try:
+                import json
+                json.dumps(err["input"])
+                clean["input"] = err["input"]
+            except (TypeError, ValueError):
+                clean["input"] = str(err["input"])
+        errors.append(clean)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed",
+                "details": {"errors": errors},
+            }
+        },
+    )
+
+
 def create_app() -> FastAPI:
     """Application factory."""
+    from fastapi.exceptions import RequestValidationError
+
     app = FastAPI(
         title="Ассоциация трихологов — API",
-        description="Backend API for the Association of Trichologists platform",
+        description=_API_DESCRIPTION,
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        openapi_tags=_OPENAPI_TAGS,
         lifespan=lifespan,
     )
 
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, _validation_error_handler)  # type: ignore[arg-type]
 
     app.add_middleware(
         CORSMiddleware,

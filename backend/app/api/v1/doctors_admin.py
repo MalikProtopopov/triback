@@ -8,6 +8,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
+from app.core.openapi import error_responses
 from app.core.pagination import PaginatedResponse
 from app.core.redis import get_redis
 from app.core.security import require_role
@@ -35,22 +36,30 @@ ADMIN_MANAGER = require_role("admin", "manager")
 ADMIN_ONLY = require_role("admin")
 
 
-# ── GET /admin/doctors ────────────────────────────────────────────
-
-@router.get("/doctors", response_model=PaginatedResponse[DoctorListItemResponse])
+@router.get(
+    "/doctors",
+    response_model=PaginatedResponse[DoctorListItemResponse],
+    summary="Список врачей",
+    responses=error_responses(401, 403),
+)
 async def list_doctors(
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    status: str | None = Query(None),
-    subscription_status: str | None = Query(None),
+    status: str | None = Query(None, description="active | pending_review | rejected | ..."),
+    subscription_status: str | None = Query(None, description="active | expired | none"),
     city_id: UUID | None = Query(None),
-    has_data_changed: bool | None = Query(None),
+    has_data_changed: bool | None = Query(None, description="Только с изменёнными данными"),
     search: str | None = Query(None, min_length=2),
     sort_by: str = Query("created_at"),
     sort_order: str = Query("desc"),
 ) -> dict[str, Any]:
+    """Пагинированный список врачей с фильтрацией и сортировкой.
+
+    - **401** — не авторизован
+    - **403** — роль не admin/manager
+    """
     svc = DoctorAdminService(db)
     return await svc.list_doctors(
         limit=limit,
@@ -65,27 +74,41 @@ async def list_doctors(
     )
 
 
-# ── GET /admin/doctors/{id} ──────────────────────────────────────
-
-@router.get("/doctors/{profile_id}", response_model=DoctorDetailResponse)
+@router.get(
+    "/doctors/{profile_id}",
+    response_model=DoctorDetailResponse,
+    summary="Детали врача",
+    responses=error_responses(401, 403, 404),
+)
 async def get_doctor(
     profile_id: UUID,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> DoctorDetailResponse:
+    """Полная карточка врача с личными данными, документами, подпиской.
+
+    - **404** — профиль не найден
+    """
     svc = DoctorAdminService(db)
     return await svc.get_doctor(profile_id)
 
 
-# ── POST /admin/doctors/{id}/moderate ─────────────────────────────
-
-@router.post("/doctors/{profile_id}/moderate", response_model=ModerateResponse)
+@router.post(
+    "/doctors/{profile_id}/moderate",
+    response_model=ModerateResponse,
+    summary="Модерация врача",
+    responses=error_responses(401, 403, 404, 422),
+)
 async def moderate_doctor(
     profile_id: UUID,
     body: ModerateRequest,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> ModerateResponse:
+    """Одобряет или отклоняет анкету врача.
+
+    - **404** — профиль не найден
+    """
     admin_id = UUID(payload["sub"])
     svc = DoctorAdminService(db)
     new_status = await svc.moderate(profile_id, admin_id, body.action, body.comment)
@@ -93,15 +116,22 @@ async def moderate_doctor(
     return ModerateResponse(moderation_status=new_status, message=msg)
 
 
-# ── POST /admin/doctors/{id}/approve-draft ────────────────────────
-
-@router.post("/doctors/{profile_id}/approve-draft", response_model=MessageResponse)
+@router.post(
+    "/doctors/{profile_id}/approve-draft",
+    response_model=MessageResponse,
+    summary="Одобрить черновик изменений",
+    responses=error_responses(401, 403, 404, 422),
+)
 async def approve_draft(
     profile_id: UUID,
     body: ApproveDraftRequest,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
+    """Одобряет или отклоняет черновые изменения публичного профиля.
+
+    - **404** — профиль или черновик не найден
+    """
     admin_id = UUID(payload["sub"])
     svc = DoctorAdminService(db)
     msg = await svc.approve_draft(
@@ -110,15 +140,22 @@ async def approve_draft(
     return MessageResponse(message=msg)
 
 
-# ── POST /admin/doctors/{id}/toggle-active ────────────────────────
-
-@router.post("/doctors/{profile_id}/toggle-active", response_model=ToggleActiveResponse)
+@router.post(
+    "/doctors/{profile_id}/toggle-active",
+    response_model=ToggleActiveResponse,
+    summary="Активировать/деактивировать профиль",
+    responses=error_responses(401, 403, 404),
+)
 async def toggle_active(
     profile_id: UUID,
     body: ToggleActiveRequest,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> ToggleActiveResponse:
+    """Включает/выключает публичную видимость профиля в каталоге.
+
+    - **404** — профиль не найден
+    """
     admin_id = UUID(payload["sub"])
     svc = DoctorAdminService(db)
     is_public = await svc.toggle_active(profile_id, admin_id, body.is_public)
@@ -126,76 +163,117 @@ async def toggle_active(
     return ToggleActiveResponse(is_public=is_public, message=msg)
 
 
-# ── POST /admin/doctors/{id}/send-reminder ────────────────────────
-
-@router.post("/doctors/{profile_id}/send-reminder", response_model=MessageResponse)
+@router.post(
+    "/doctors/{profile_id}/send-reminder",
+    response_model=MessageResponse,
+    summary="Отправить напоминание",
+    responses=error_responses(401, 403, 404),
+)
 async def send_reminder(
     profile_id: UUID,
     body: SendReminderRequest,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
+    """Отправляет напоминание врачу (уведомление).
+
+    - **404** — профиль не найден
+    """
     svc = DoctorAdminService(db)
     await svc.send_reminder(profile_id, body.message)
     return MessageResponse(message="Напоминание отправлено")
 
 
-# ── POST /admin/doctors/{id}/send-email ───────────────────────────
-
-@router.post("/doctors/{profile_id}/send-email", response_model=MessageResponse)
+@router.post(
+    "/doctors/{profile_id}/send-email",
+    response_model=MessageResponse,
+    summary="Отправить email",
+    responses=error_responses(401, 403, 404),
+)
 async def send_email(
     profile_id: UUID,
     body: SendEmailRequest,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
+    """Отправляет email врачу.
+
+    - **404** — профиль не найден
+    """
     svc = DoctorAdminService(db)
     await svc.send_email(profile_id, body.subject, body.body)
     return MessageResponse(message="Письмо отправлено")
 
 
-# ── POST /admin/doctors/import ────────────────────────────────────
-
-@router.post("/doctors/import", response_model=ImportStartResponse, status_code=202)
+@router.post(
+    "/doctors/import",
+    response_model=ImportStartResponse,
+    status_code=202,
+    summary="Импорт врачей из Excel",
+    responses=error_responses(401, 403, 422),
+)
 async def import_doctors(
     file: UploadFile,
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> ImportStartResponse:
+    """Запускает фоновый импорт врачей из Excel-файла.
+    Статус импорта можно отслеживать через `GET /admin/doctors/import/{task_id}`.
+
+    - **401** — не авторизован
+    - **403** — роль не admin
+    """
     contents = await file.read()
     svc = DoctorAdminService(db)
     task_id = await svc.start_import(contents, redis)
     return ImportStartResponse(task_id=task_id, message="Импорт запущен")
 
 
-# ── GET /admin/doctors/import/{task_id} ───────────────────────────
-
-@router.get("/doctors/import/{task_id}", response_model=ImportStatusResponse)
+@router.get(
+    "/doctors/import/{task_id}",
+    response_model=ImportStatusResponse,
+    summary="Статус импорта",
+    responses=error_responses(401, 403, 404),
+)
 async def get_import_status(
     task_id: str,
     payload: dict[str, Any] = ADMIN_ONLY,
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> ImportStatusResponse:
+    """Проверяет статус фонового импорта.
+
+    - **404** — задача не найдена
+    """
     svc = DoctorAdminService(db=None)  # type: ignore[arg-type]
     return await svc.get_import_status(task_id, redis)
 
 
-# ── GET /admin/portal-users/{user_id} ────────────────────────────
-
-@router.get("/portal-users/{user_id}", response_model=PortalUserDetailResponse)
+@router.get(
+    "/portal-users/{user_id}",
+    response_model=PortalUserDetailResponse,
+    summary="Детали пользователя портала",
+    responses=error_responses(401, 403, 404),
+)
 async def get_portal_user(
     user_id: UUID,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> PortalUserDetailResponse:
+    """Полная информация о пользователе портала (аккаунт + профиль).
+
+    - **404** — пользователь не найден
+    """
     svc = DoctorAdminService(db)
     return await svc.get_portal_user(user_id)
 
 
-# ── GET /admin/portal-users ──────────────────────────────────────
-
-@router.get("/portal-users", response_model=PaginatedResponse[PortalUserListItem])
+@router.get(
+    "/portal-users",
+    response_model=PaginatedResponse[PortalUserListItem],
+    summary="Список пользователей портала",
+    responses=error_responses(401, 403),
+)
 async def list_portal_users(
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
@@ -205,6 +283,11 @@ async def list_portal_users(
     sort_by: str = Query("created_at"),
     sort_order: str = Query("desc"),
 ) -> dict[str, Any]:
+    """Пагинированный список всех зарегистрированных пользователей.
+
+    - **401** — не авторизован
+    - **403** — роль не admin/manager
+    """
     svc = DoctorAdminService(db)
     return await svc.list_portal_users(
         limit=limit,

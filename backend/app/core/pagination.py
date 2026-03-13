@@ -21,7 +21,17 @@ class PaginationParams:
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
-    """Standard paginated list response: { data, total, limit, offset }."""
+    """Standard paginated list response.
+
+    All list endpoints return this shape::
+
+        {
+            "data": [...],
+            "total": 42,
+            "limit": 20,
+            "offset": 0
+        }
+    """
 
     data: list[T]
     total: int

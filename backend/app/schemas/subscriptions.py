@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class PayRequest(BaseModel):
@@ -16,6 +16,15 @@ class PayResponse(BaseModel):
     payment_url: str
     amount: float
     expires_at: datetime | None = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "payment_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "payment_url": "https://yookassa.ru/payments/...",
+            "amount": 15000.0,
+            "expires_at": "2026-04-01T12:00:00Z",
+        }
+    })
 
 
 class PlanNested(BaseModel):
@@ -60,3 +69,27 @@ class SubscriptionStatusResponse(BaseModel):
     has_paid_entry_fee: bool
     can_renew: bool
     next_action: str | None = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "has_subscription": True,
+            "current_subscription": {
+                "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "plan": {"code": "annual", "name": "Годовой взнос"},
+                "status": "active",
+                "starts_at": "2026-01-01T00:00:00Z",
+                "ends_at": "2027-01-01T00:00:00Z",
+                "days_remaining": 295,
+            },
+            "has_paid_entry_fee": True,
+            "can_renew": False,
+            "next_action": None,
+        }
+    })
+
+
+class UserPaymentPaginatedResponse(BaseModel):
+    data: list[UserPaymentListItem]
+    total: int
+    limit: int
+    offset: int

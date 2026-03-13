@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import get_current_user_id
+from app.core.openapi import error_responses
 from app.schemas.onboarding import (
     ChooseRoleRequest,
     DocumentUploadResponse,
@@ -20,40 +21,75 @@ from app.services.onboarding_service import OnboardingService
 router = APIRouter(prefix="/onboarding")
 
 
-@router.get("/status", response_model=OnboardingStatusResponse)
+@router.get(
+    "/status",
+    response_model=OnboardingStatusResponse,
+    summary="Статус онбординга",
+    responses=error_responses(401),
+)
 async def get_status(
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> OnboardingStatusResponse:
+    """Текущий шаг и состояние прохождения онбординга.
+
+    - **401** — не авторизован
+    """
     svc = OnboardingService(db)
     status = await svc.get_status(user_id)
     return OnboardingStatusResponse(**status)
 
 
-@router.post("/choose-role", response_model=OnboardingStepResponse)
+@router.post(
+    "/choose-role",
+    response_model=OnboardingStepResponse,
+    summary="Выбор роли",
+    responses=error_responses(401, 409, 422),
+)
 async def choose_role(
     data: ChooseRoleRequest,
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> OnboardingStepResponse:
+    """Устанавливает роль пользователя (doctor). Можно вызвать только один раз.
+
+    - **401** — не авторизован
+    - **409** — роль уже выбрана
+    """
     svc = OnboardingService(db)
     result = await svc.choose_role(user_id, data.role)
     return OnboardingStepResponse(**result)
 
 
-@router.patch("/doctor-profile", response_model=OnboardingStepResponse)
+@router.patch(
+    "/doctor-profile",
+    response_model=OnboardingStepResponse,
+    summary="Заполнение анкеты врача",
+    responses=error_responses(401, 404, 422),
+)
 async def update_doctor_profile(
     data: OnboardingProfileUpdate,
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> OnboardingStepResponse:
+    """Заполняет или обновляет поля анкеты врача на этапе онбординга.
+
+    - **401** — не авторизован
+    - **404** — профиль не создан (роль не выбрана)
+    """
     svc = OnboardingService(db)
     update_data = data.model_dump(exclude_unset=True)
     result = await svc.update_doctor_profile(user_id, update_data)
     return OnboardingStepResponse(**result)
 
 
-@router.post("/documents", status_code=201, response_model=DocumentUploadResponse)
+@router.post(
+    "/documents",
+    status_code=201,
+    response_model=DocumentUploadResponse,
+    summary="Загрузка документа",
+    responses=error_responses(401, 404, 422),
+)
 async def upload_document(
     file: UploadFile = File(...),
     document_type: Literal[
@@ -62,6 +98,11 @@ async def upload_document(
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> DocumentUploadResponse:
+    """Загружает документ (диплом, сертификат) в S3.
+
+    - **401** — не авторизован
+    - **404** — профиль не создан
+    """
     svc = OnboardingService(db)
     doc = await svc.upload_document(user_id, document_type, file)
     return DocumentUploadResponse(
@@ -72,11 +113,21 @@ async def upload_document(
     )
 
 
-@router.post("/submit", response_model=OnboardingStepResponse)
+@router.post(
+    "/submit",
+    response_model=OnboardingStepResponse,
+    summary="Отправка на модерацию",
+    responses=error_responses(401, 409),
+)
 async def submit(
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> OnboardingStepResponse:
+    """Отправляет заполненную анкету на модерацию. Повторная отправка невозможна.
+
+    - **401** — не авторизован
+    - **409** — анкета уже отправлена на модерацию
+    """
     svc = OnboardingService(db)
     result = await svc.submit(user_id)
     return OnboardingStepResponse(**result)

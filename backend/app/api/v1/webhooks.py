@@ -19,13 +19,25 @@ router = APIRouter(prefix="/webhooks")
 _DEDUP_TTL = 86400
 
 
-@router.post("/yookassa")
+@router.post(
+    "/yookassa",
+    summary="YooKassa webhook",
+    responses={
+        200: {"description": "Webhook обработан успешно"},
+        403: {"description": "IP-адрес не в белом списке"},
+        500: {"description": "Ошибка обработки (webhook будет повторён)"},
+    },
+)
 async def yookassa_webhook(
     request: Request,
     body: WebhookPayload,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> JSONResponse:
+    """Принимает уведомления от YooKassa о статусе платежей.
+    Идемпотентность обеспечивается через Redis (dedup key с TTL 24ч).
+    Не вызывать напрямую — только для YooKassa.
+    """
     forwarded = request.headers.get("x-forwarded-for")
     client_ip = forwarded.split(",")[0].strip() if forwarded else ""
     if not client_ip and request.client:

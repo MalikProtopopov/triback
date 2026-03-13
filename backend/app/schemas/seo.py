@@ -47,3 +47,10 @@ class SeoPageResponse(BaseModel):
     canonical_url: str | None = None
     custom_meta: dict | None = None
     updated_at: datetime
+
+
+class SeoPagePaginatedResponse(BaseModel):
+    data: list[SeoPageResponse]
+    total: int
+    limit: int
+    offset: int

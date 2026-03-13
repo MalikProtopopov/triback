@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # ── SEO ───────────────────────────────────────────────────────────
 
@@ -131,6 +131,44 @@ class EventPublicDetailResponse(BaseModel):
     recordings: list[RecordingPublicNested] = []
     seo: SeoNested | None = None
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "title": "Конференция трихологов 2026",
+            "slug": "conference-2026",
+            "description": "Ежегодная конференция...",
+            "event_date": "2026-06-15T10:00:00Z",
+            "event_end_date": "2026-06-16T18:00:00Z",
+            "location": "Москва, Крокус Экспо",
+            "cover_image_url": "/media/events/cover-2026.jpg",
+            "tariffs": [
+                {
+                    "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                    "name": "Стандарт",
+                    "description": "Участие в основной программе",
+                    "conditions": None,
+                    "details": None,
+                    "price": 10000.0,
+                    "member_price": 5000.0,
+                    "benefits": ["Доступ к записям", "Сертификат"],
+                    "seats_limit": 200,
+                    "seats_available": 150,
+                }
+            ],
+            "galleries": [],
+            "recordings": [],
+            "seo": {
+                "title": "Конференция трихологов 2026",
+                "description": "Ежегодная конференция...",
+                "og_url": None,
+                "og_type": "website",
+                "og_image": None,
+                "twitter_card": "summary_large_image",
+                "canonical_url": None,
+            },
+        }
+    })
+
 
 # ── Articles ──────────────────────────────────────────────────────
 
@@ -166,3 +204,57 @@ class ArticleThemeResponse(BaseModel):
     id: UUID
     slug: str
     title: str
+
+
+# ── Wrappers for endpoints that return {"data": [...]} ──────────
+
+
+class CityListResponse(BaseModel):
+    data: list[CityResponse | CityWithDoctorsResponse]
+
+
+class GalleryPhotoItem(BaseModel):
+    id: str
+    file_url: str | None = None
+    thumbnail_url: str | None = None
+    caption: str | None = None
+
+
+class GalleryItem(BaseModel):
+    id: str
+    title: str
+    access_level: str
+    photos: list[GalleryPhotoItem] = []
+
+
+class GalleryListResponse(BaseModel):
+    data: list[GalleryItem]
+
+
+class RecordingItem(BaseModel):
+    id: str
+    title: str
+    video_source: str
+    video_url: str | None = None
+    duration_seconds: int | None = None
+    access_level: str
+
+
+class RecordingListResponse(BaseModel):
+    data: list[RecordingItem]
+
+
+class ArticleThemeListResponse(BaseModel):
+    data: list[ArticleThemeResponse]
+
+
+class OrgDocPublicItem(BaseModel):
+    id: str
+    title: str
+    slug: str
+    content: str | None = None
+    file_url: str | None = None
+
+
+class OrgDocPublicListResponse(BaseModel):
+    data: list[OrgDocPublicItem]

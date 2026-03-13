@@ -67,3 +67,11 @@ class PlanAdminResponse(BaseModel):
     duration_months: int
     is_active: bool
     sort_order: int
+
+
+class CityAdminListResponse(BaseModel):
+    data: list[CityAdminResponse]
+
+
+class PlanAdminListResponse(BaseModel):
+    data: list[PlanAdminResponse]

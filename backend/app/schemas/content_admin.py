@@ -89,6 +89,10 @@ class ThemeAdminResponse(BaseModel):
     articles_count: int = 0
 
 
+class ThemeAdminListResponse(BaseModel):
+    data: list[ThemeAdminResponse]
+
+
 # ── Organization Documents ────────────────────────────────────────
 
 class OrgDocCreateRequest(BaseModel):

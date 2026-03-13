@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class RegisterForEventRequest(BaseModel):
@@ -23,6 +23,44 @@ class RegisterForEventResponse(BaseModel):
     is_member_price: bool | None = None
     action: str | None = None
     masked_email: str | None = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [
+            {
+                "summary": "Сценарий 1 — авторизованный пользователь",
+                "value": {
+                    "registration_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "payment_url": "https://yookassa.ru/payments/...",
+                    "applied_price": 5000.0,
+                    "is_member_price": True,
+                    "action": None,
+                    "masked_email": None,
+                },
+            },
+            {
+                "summary": "Сценарий 2 — гость с существующим аккаунтом",
+                "value": {
+                    "registration_id": None,
+                    "payment_url": None,
+                    "applied_price": None,
+                    "is_member_price": None,
+                    "action": "login_required",
+                    "masked_email": "m***@mail.ru",
+                },
+            },
+            {
+                "summary": "Сценарий 3 — новый гость (верификация)",
+                "value": {
+                    "registration_id": None,
+                    "payment_url": None,
+                    "applied_price": None,
+                    "is_member_price": None,
+                    "action": "verification_required",
+                    "masked_email": None,
+                },
+            },
+        ]
+    })
 
 
 class ConfirmGuestRegistrationRequest(BaseModel):
@@ -44,3 +82,10 @@ class MyEventListItem(BaseModel):
     status: str
     applied_price: float
     is_member_price: bool
+
+
+class MyEventsPaginatedResponse(BaseModel):
+    data: list[MyEventListItem]
+    total: int
+    limit: int
+    offset: int
