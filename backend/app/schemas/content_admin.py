@@ -130,3 +130,12 @@ class OrgDocDetailResponse(BaseModel):
     updated_by: UUID | None = None
     created_at: datetime
     updated_at: datetime | None = None
+
+
+class OrgDocReorderItem(BaseModel):
+    id: UUID
+    sort_order: int
+
+
+class OrgDocReorderRequest(BaseModel):
+    items: list[OrgDocReorderItem] = Field(min_length=1)

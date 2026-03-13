@@ -16,6 +16,8 @@ from app.schemas.payments import (
     ManualPaymentRequest,
     ManualPaymentResponse,
     PaymentListResponse,
+    RefundRequest,
+    RefundResponse,
 )
 from app.services.subscription_service import SubscriptionService
 
@@ -87,3 +89,29 @@ async def create_manual_payment(
     admin_id = UUID(payload["sub"])
     svc = SubscriptionService(db, redis)
     return await svc.create_manual_payment(admin_id, body)
+
+
+@router.post(
+    "/payments/{payment_id}/refund",
+    response_model=RefundResponse,
+    summary="Возврат платежа",
+    responses=error_responses(401, 403, 404, 422),
+)
+async def refund_payment(
+    payment_id: UUID,
+    body: RefundRequest,
+    payload: dict[str, Any] = ADMIN_ACCOUNTANT,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> dict:
+    """Инициирует возврат платежа через YooKassa. Поддерживает
+    частичный и полный возврат. Финальный статус придёт через webhook
+    `refund.succeeded`.
+
+    - **401** -- не авторизован
+    - **403** -- роль не admin/accountant
+    - **404** -- платёж не найден
+    - **422** -- платёж нельзя вернуть (неверный статус, сумма превышает)
+    """
+    svc = SubscriptionService(db, redis)
+    return await svc.initiate_refund(payment_id, body.amount, body.reason)

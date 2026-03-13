@@ -122,6 +122,44 @@ class VotingService:
 
     # ── Admin CRUD ────────────────────────────────────────────────
 
+    async def get_session(self, session_id: UUID) -> dict:
+        result = await self.db.execute(
+            select(VotingSession)
+            .options(selectinload(VotingSession.candidates))
+            .where(VotingSession.id == session_id)
+        )
+        session = result.scalar_one_or_none()
+        if not session:
+            raise NotFoundError("Voting session not found")
+
+        candidates: list[dict] = []
+        for cand in sorted(session.candidates, key=lambda c: c.sort_order):
+            profile = await self.db.get(DoctorProfile, cand.doctor_profile_id)
+            full_name = ""
+            photo_url = None
+            if profile:
+                full_name = f"{profile.last_name} {profile.first_name}"
+                photo_url = profile.photo_url
+            candidates.append({
+                "id": str(cand.id),
+                "doctor_profile_id": str(cand.doctor_profile_id),
+                "full_name": full_name,
+                "photo_url": photo_url,
+                "description": cand.description,
+                "sort_order": cand.sort_order,
+            })
+
+        return {
+            "id": str(session.id),
+            "title": session.title,
+            "description": session.description,
+            "status": session.status,
+            "starts_at": session.starts_at.isoformat(),
+            "ends_at": session.ends_at.isoformat(),
+            "candidates": candidates,
+            "created_at": session.created_at.isoformat(),
+        }
+
     async def list_sessions(
         self,
         limit: int = 20,

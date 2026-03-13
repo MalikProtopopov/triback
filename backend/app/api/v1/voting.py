@@ -17,6 +17,7 @@ from app.schemas.voting import (
     VotingResultsResponse,
     VotingSessionCreatedResponse,
     VotingSessionCreateRequest,
+    VotingSessionDetailResponse,
     VotingSessionListItem,
     VotingSessionUpdateRequest,
 )
@@ -93,6 +94,26 @@ async def list_voting_sessions(
     """
     svc = VotingService(db)
     return await svc.list_sessions(pagination.limit, pagination.offset, status)
+
+
+@router.get(
+    "/admin/voting/{session_id}",
+    response_model=VotingSessionDetailResponse,
+    summary="Детали голосования",
+    responses=error_responses(401, 403, 404),
+)
+async def get_voting_session(
+    session_id: UUID,
+    payload: dict[str, Any] = require_role("admin", "manager"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Полная информация о сессии голосования, включая список кандидатов
+    с именами и фотографиями.
+
+    - **404** -- сессия не найдена
+    """
+    svc = VotingService(db)
+    return await svc.get_session(session_id)
 
 
 @router.post(

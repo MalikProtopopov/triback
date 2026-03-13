@@ -111,6 +111,7 @@ app/
 
 | Ресурс / Действие                              | Admin | Manager | Accountant | Doctor | NonDoctor | Guest |
 |-------------------------------------------------|:-----:|:-------:|:----------:|:------:|:---------:|:-----:|
+| **Управление сотрудниками** (CRUD admin/manager/accountant) | ✓     |         |            |        |           |       |
 | **Управление врачами** (список, карточка, модерация) | ✓     | ✓       |            |        |           |       |
 | Активация/деактивация профиля врача              | ✓     | ✓       |            |        |           |       |
 | Импорт врачей из Excel                           | ✓     |         |            |        |           |       |
@@ -1076,6 +1077,117 @@ app/
   ]
 }
 ```
+
+---
+
+### STAFF USERS (Admin) — управление сотрудниками
+
+---
+
+#### GET /api/v1/admin/users
+
+**Назначение:** Список сотрудников системы (admin, manager, accountant) с пагинацией и поиском  
+**Доступ:** Admin
+
+**Query params:**
+
+| Параметр | Тип    | Default    | Описание |
+|----------|--------|------------|----------|
+| limit    | int    | 20         | Кол-во на страницу (max 100) |
+| offset   | int    | 0          | Смещение |
+| role     | string | —          | Фильтр: admin / manager / accountant |
+| search   | string | —          | Поиск по email (min 2 символа) |
+
+**Response 200:**
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "email": "admin@example.com",
+      "role": "admin",
+      "role_display": "Администратор",
+      "is_active": true,
+      "created_at": "2026-01-15T09:30:00Z"
+    }
+  ],
+  "total": 3, "limit": 20, "offset": 0
+}
+```
+
+---
+
+#### POST /api/v1/admin/users
+
+**Назначение:** Создание сотрудника  
+**Доступ:** Admin
+
+**Request body:**
+```json
+{
+  "email": "manager@example.com",
+  "password": "SecurePass123!",
+  "role": "manager"
+}
+```
+
+**Response 201:**
+```json
+{
+  "id": "uuid",
+  "email": "manager@example.com",
+  "role": "manager",
+  "role_display": "Менеджер"
+}
+```
+
+**Response 409:** `{ "error": { "code": "CONFLICT", "message": "User with this email already exists" } }`
+
+---
+
+#### GET /api/v1/admin/users/{user_id}
+
+**Назначение:** Детали сотрудника  
+**Доступ:** Admin
+
+**Response 200:**
+```json
+{
+  "id": "uuid",
+  "email": "admin@example.com",
+  "role": "admin",
+  "role_display": "Администратор",
+  "is_active": true,
+  "is_verified": true,
+  "last_login_at": "2026-03-10T12:00:00Z",
+  "created_at": "2026-01-15T09:30:00Z"
+}
+```
+
+---
+
+#### PATCH /api/v1/admin/users/{user_id}
+
+**Назначение:** Обновление сотрудника (email, role, is_active)  
+**Доступ:** Admin
+
+**Request body (частичное обновление):**
+```json
+{
+  "role": "accountant",
+  "is_active": false
+}
+```
+
+---
+
+#### DELETE /api/v1/admin/users/{user_id}
+
+**Назначение:** Мягкое удаление сотрудника  
+**Доступ:** Admin  
+**Ограничение:** Нельзя удалить самого себя (403).
+
+**Response 204** (No Content)
 
 ---
 
@@ -2733,6 +2845,25 @@ app/
 
 ---
 
+#### PATCH /api/v1/admin/organization-documents/reorder
+
+**Назначение:** Массовое обновление sort_order для документов организации  
+**Доступ:** Admin, Manager
+
+**Request body:**
+```json
+{
+  "items": [
+    {"id": "uuid-1", "sort_order": 0},
+    {"id": "uuid-2", "sort_order": 1}
+  ]
+}
+```
+
+**Response 200:** Массив обновлённых документов, отсортированных по sort_order.
+
+---
+
 #### GET /api/v1/organization-documents
 
 **Назначение:** Публичный список документов организации (устав, правление)  
@@ -2753,7 +2884,7 @@ app/
 
 ### CONTENT BLOCKS
 
-> **NOT IMPLEMENTED** — CRUD-эндпоинты для Content Blocks **не реализованы** на бекенде. Модель `ContentBlock` существует в БД, но API отсутствует. Спецификация сохранена для будущей реализации.
+> **IMPLEMENTED** — CRUD-эндпоинты для Content Blocks реализованы. Модуль: `backend/app/api/v1/content_blocks_admin.py`.
 
 Универсальные контентные блоки для статей, мероприятий, профилей врачей, документов организации. Полиморфная связь через `entity_type` + `entity_id`.
 
@@ -2798,7 +2929,7 @@ app/
 **Назначение:** Изменение порядка блоков (drag-and-drop)  
 **Доступ:** Admin, Manager
 
-**Request body:** `{ "entity_type", "entity_id", "locale", "block_ids": ["uuid1", "uuid2"] }`
+**Request body:** `{ "items": [{"id": "uuid1", "sort_order": 0}, {"id": "uuid2", "sort_order": 1}] }`
 
 ---
 
@@ -3269,6 +3400,36 @@ app/
 **Query params:** limit, offset, status (draft/active/closed/cancelled)
 
 **Response 200:** пагинированный список сессий (id, title, description, status, starts_at, ends_at, candidates_count)
+
+---
+
+#### GET /api/v1/admin/voting/{session_id}
+
+**Назначение:** Детали сессии голосования с полным списком кандидатов  
+**Доступ:** Admin, Manager
+
+**Response 200:**
+```json
+{
+  "id": "uuid",
+  "title": "Выборы президента 2026",
+  "description": "Описание голосования",
+  "status": "active",
+  "starts_at": "2026-04-01T10:00:00Z",
+  "ends_at": "2026-04-15T18:00:00Z",
+  "candidates": [
+    {
+      "id": "uuid",
+      "doctor_profile_id": "uuid",
+      "full_name": "Иванов Иван",
+      "photo_url": "/uploads/photo.jpg",
+      "description": "Кандидат #1",
+      "sort_order": 0
+    }
+  ],
+  "created_at": "2026-03-20T09:00:00Z"
+}
+```
 
 ---
 

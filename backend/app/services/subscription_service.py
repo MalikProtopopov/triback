@@ -483,6 +483,55 @@ class SubscriptionService:
 
         await self.db.commit()
 
+    # ── Admin: initiate refund ────────────────────────────────────
+
+    async def initiate_refund(
+        self,
+        payment_id: UUID,
+        amount: float | None,
+        reason: str,
+    ) -> dict[str, Any]:
+        from app.schemas.payments import RefundResponse
+
+        payment = await self.db.get(Payment, payment_id)
+        if not payment:
+            raise NotFoundError("Payment not found")
+
+        if payment.status != "succeeded":
+            raise AppValidationError(
+                f"Cannot refund payment with status '{payment.status}'"
+            )
+        if not payment.external_payment_id:
+            raise AppValidationError(
+                "Cannot refund a manual payment through YooKassa"
+            )
+
+        refund_amount = Decimal(str(amount)) if amount else Decimal(str(payment.amount))
+        if refund_amount > Decimal(str(payment.amount)):
+            raise AppValidationError("Refund amount exceeds payment amount")
+
+        idempotency_key = f"refund-{payment.id}-{refund_amount}"
+        yookassa_resp = await self.yookassa.create_refund(
+            payment_id=payment.external_payment_id,
+            amount=refund_amount,
+            description=reason,
+            idempotency_key=idempotency_key,
+        )
+
+        logger.info(
+            "refund_initiated",
+            payment_id=str(payment_id),
+            refund_id=yookassa_resp.get("id"),
+            amount=str(refund_amount),
+        )
+
+        return RefundResponse(
+            refund_id=yookassa_resp.get("id", ""),
+            payment_id=str(payment.external_payment_id),
+            status=yookassa_resp.get("status", "pending"),
+            amount=float(refund_amount),
+        ).model_dump()
+
     # ── Doctor: list own payments ─────────────────────────────────
 
     async def list_user_payments(

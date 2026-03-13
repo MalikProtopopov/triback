@@ -58,6 +58,26 @@ class VotingSessionCreatedResponse(BaseModel):
     candidates_count: int = 0
 
 
+class CandidateDetailNested(BaseModel):
+    id: UUID
+    doctor_profile_id: UUID
+    full_name: str
+    photo_url: str | None = None
+    description: str | None = None
+    sort_order: int = 0
+
+
+class VotingSessionDetailResponse(BaseModel):
+    id: UUID
+    title: str
+    description: str | None = None
+    status: str
+    starts_at: datetime
+    ends_at: datetime
+    candidates: list[CandidateDetailNested] = []
+    created_at: datetime
+
+
 # ── Responses (public) ────────────────────────────────────────────
 
 class ActiveCandidateNested(BaseModel):

@@ -21,15 +21,17 @@
 | Регистрация на мероприятия (3 сценария + верификация email) | **Готов** | Новый флоу! |
 | Админ: врачи (CRUD, модерация, импорт Excel) | **Готов** | |
 | Админ: мероприятия (CRUD, тарифы, галереи, записи) | **Готов** | |
-| Админ: контент (статьи, темы, документы организации) | **Готов** | |
-| Админ: платежи (список, ручной платёж) | **Готов** | |
+| Админ: контент (статьи, темы, документы организации) | **Готов** | Новый: reorder документов |
+| Админ: контентные блоки (CRUD + reorder) | **Готов** | Новый модуль! |
+| Админ: платежи (список, ручной платёж, возврат) | **Готов** | Новый: refund через YooKassa |
 | Админ: настройки (site_settings, города, планы) | **Готов** | |
 | Админ: SEO-страницы | **Готов** | |
 | Админ: Dashboard | **Готов** | |
+| Админ: сотрудники (admin/manager/accountant CRUD) | **Готов** | Новый модуль! |
 | Уведомления (email/telegram, шаблоны) | **Готов** | Email-таски = заглушки (логирование) |
 | Сертификаты (генерация PDF, скачивание) | **Готов** | |
 | Telegram-привязка (код, webhook, канал) | **Готов** | |
-| Голосование (CRUD, vote, результаты) | **Готов** | |
+| Голосование (CRUD, vote, результаты, детали) | **Готов** | Новый: GET по ID |
 | Пользователи портала (список, детальная) | **Готов** | |
 
 ### 1.2 Что НЕ реализовано (нет на бекенде)
@@ -39,7 +41,7 @@
 | `GET /api/v1/pages/home` (контент hero, миссия) | **Нет** | Использовать `GET /api/v1/admin/settings` для получения контактов. Hero/миссию можно захардкодить на фронте или добавить через `site_settings` |
 | `GET /api/v1/settings/public` (контакты, бот) | **Нет** | Данные можно получить через `GET /api/v1/admin/settings` (требует auth). Нужен публичный endpoint или захардкодить на фронте |
 | `GET /api/v1/events/{id}/check-price` | **Нет** | Цена определяется на клиенте: если JWT → цена = `member_price` (при активной подписке) или `price`. Бекенд сам определит при `POST /register` |
-| Content Blocks CRUD (`/api/v1/admin/content-blocks`) | **Нет** | Модель `ContentBlock` есть в БД, но эндпоинтов нет. Если нужно — добавим |
+| Content Blocks CRUD (`/api/v1/admin/content-blocks`) | **Готов** | CRUD + reorder реализованы |
 | `GET /api/v1/specializations` | **Нет** | Фильтр по специализации = строковый query param `specialization` в `GET /doctors`. Список специализаций можно собрать из результатов |
 
 ---
@@ -506,3 +508,46 @@ NEXT_PUBLIC_SITE_URL=https://trichologia.mediann.dev
 ```
 
 Nginx для фронтенда настраивается отдельно на сервере-хосте фронтов.
+
+---
+
+## 11. Исправления путей на фронтенде (ВАЖНО!)
+
+При интеграции обнаружены несоответствия путей на фронтенде:
+
+| Фронтенд использует | Правильный путь на бэкенде | Где в коде фронта |
+|---------------------|---------------------------|-------------------|
+| `GET /admin/users/search?q=` | `GET /api/v1/admin/portal-users?search=...` | `payments/page.tsx:68` |
+| `GET /payments/{id}/receipt` | `GET /api/v1/subscriptions/payments/{id}/receipt` | Компонент чека |
+
+Подробный разбор: см. `docs/PHANTOM_ENDPOINTS_ANALYSIS.md`.
+
+---
+
+## 12. Новые эндпоинты (март 2026)
+
+### 12.1 Admin Users CRUD — управление сотрудниками
+
+`GET/POST/PATCH/DELETE /api/v1/admin/users` + `GET /api/v1/admin/users/{id}`
+
+Управление пользователями с ролями `admin`, `manager`, `accountant`. Доступ: только `admin`.
+
+### 12.2 Content Blocks CRUD — контентные блоки
+
+`GET/POST/PATCH/DELETE /api/v1/admin/content-blocks` + `POST /api/v1/admin/content-blocks/reorder`
+
+Блоки контента для статей, мероприятий, профилей, документов. Типы: text, image, video, gallery, link.
+
+### 12.3 Organization Documents Reorder
+
+`PATCH /api/v1/admin/organization-documents/reorder` — массовое обновление sort_order.
+
+### 12.4 Admin Payment Refund
+
+`POST /api/v1/admin/payments/{payment_id}/refund` — возврат платежа через YooKassa.
+
+### 12.5 Voting Session Details
+
+`GET /api/v1/admin/voting/{session_id}` — полные данные сессии с кандидатами.
+
+Подробная документация: см. `docs/PHANTOM_ENDPOINTS_ANALYSIS.md`.

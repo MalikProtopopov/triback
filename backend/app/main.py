@@ -141,6 +141,8 @@ _OPENAPI_TAGS = [
     {"name": "Admin - Dashboard", "description": "Сводная статистика: пользователи, подписки, платежи, мероприятия"},
     {"name": "Admin - Notifications", "description": "Отправка уведомлений пользователям, журнал уведомлений"},
     {"name": "Admin - SEO", "description": "Управление SEO-метаданными страниц"},
+    {"name": "Admin - Users", "description": "Управление сотрудниками системы: администраторы, менеджеры, бухгалтеры"},
+    {"name": "Admin - Content Blocks", "description": "Управление контентными блоками сущностей (статьи, мероприятия, профили врачей)"},
     {"name": "Webhooks", "description": "Внутренние webhook-эндпоинты (YooKassa). Не вызывать напрямую."},
     {"name": "System", "description": "Служебные эндпоинты: health check"},
 ]

@@ -18,6 +18,7 @@ from app.schemas.content_admin import (
     OrgDocCreateRequest,
     OrgDocDetailResponse,
     OrgDocListItem,
+    OrgDocReorderRequest,
     OrgDocUpdateRequest,
     ThemeAdminListResponse,
     ThemeAdminResponse,
@@ -292,6 +293,25 @@ async def update_org_doc(
     admin_id = UUID(payload["sub"])
     svc = ContentAdminService(db)
     return await svc.update_org_doc(doc_id, admin_id, body.model_dump(exclude_none=True), file)
+
+
+@router.patch(
+    "/organization-documents/reorder",
+    response_model=list[OrgDocDetailResponse],
+    summary="Перестановка документов",
+    responses=error_responses(401, 403, 404, 422),
+)
+async def reorder_org_docs(
+    body: OrgDocReorderRequest,
+    payload: dict[str, Any] = ADMIN_MANAGER,
+    db: AsyncSession = Depends(get_db_session),
+) -> list[OrgDocDetailResponse]:
+    """Массовое обновление sort_order для документов организации.
+
+    - **404** -- один из документов не найден
+    """
+    svc = ContentAdminService(db)
+    return await svc.reorder_org_docs([item.model_dump() for item in body.items])
 
 
 @router.delete(

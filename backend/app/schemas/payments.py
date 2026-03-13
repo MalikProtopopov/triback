@@ -58,6 +58,33 @@ class ManualPaymentResponse(BaseModel):
     payment_provider: str
 
 
+# ── Admin refund ──────────────────────────────────────────────────
+
+class RefundRequest(BaseModel):
+    amount: float | None = Field(None, gt=0, description="Сумма возврата (если None — полный возврат)")
+    reason: str = Field(max_length=500, description="Причина возврата")
+
+    model_config = {"json_schema_extra": {
+        "example": {"amount": 5000.0, "reason": "Клиент запросил возврат"}
+    }}
+
+
+class RefundResponse(BaseModel):
+    refund_id: str
+    payment_id: str
+    status: str
+    amount: float
+
+    model_config = {"json_schema_extra": {
+        "example": {
+            "refund_id": "2da5c87d-000f-5000-9000-1f2e3d4c5b6a",
+            "payment_id": "2da5c87d-000f-5000-8000-1a2b3c4d5e6f",
+            "status": "pending",
+            "amount": 5000.0,
+        }
+    }}
+
+
 # ── Webhook ───────────────────────────────────────────────────────
 
 class WebhookPayload(BaseModel):

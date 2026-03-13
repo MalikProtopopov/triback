@@ -455,6 +455,22 @@ class ContentAdminService:
         await self.db.delete(doc)
         await self.db.commit()
 
+    async def reorder_org_docs(
+        self, items: list[dict[str, Any]]
+    ) -> list[OrgDocDetailResponse]:
+        result = []
+        for item in items:
+            doc = await self.db.get(OrganizationDocument, item["id"])
+            if not doc:
+                raise NotFoundError(f"Document {item['id']} not found")
+            doc.sort_order = item["sort_order"]
+            result.append(doc)
+        await self.db.commit()
+        return [
+            self._org_doc_detail(d)
+            for d in sorted(result, key=lambda d: d.sort_order)
+        ]
+
     def _org_doc_detail(self, d: OrganizationDocument) -> OrgDocDetailResponse:
         return OrgDocDetailResponse(
             id=d.id,
