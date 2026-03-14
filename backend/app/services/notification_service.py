@@ -24,8 +24,9 @@ class NotificationService:
     # ── Low-level dispatch (stubs) ────────────────────────────────
 
     async def send_email(self, to: str, subject: str, body: str) -> None:
-        """Stub: send email. Replace with aiosmtplib when SMTP is ready."""
-        logger.info("send_email", to=to, subject=subject)
+        from app.services.email_sender import send_smtp_email
+
+        await send_smtp_email(to, subject, body)
 
     async def send_telegram(self, chat_id: int, text: str) -> None:
         """Stub: send Telegram message. Delegates to TelegramService."""

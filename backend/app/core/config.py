@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "noreply@triho.ru"
+    SMTP_TLS: bool = False
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = ""
