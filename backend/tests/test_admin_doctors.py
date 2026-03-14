@@ -3,7 +3,153 @@
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.conftest import _make_auth_headers
+
 ADMIN_DOCTORS_URL = "/api/v1/admin/doctors"
+
+
+# ── Create doctor tests ──────────────────────────────────────────
+
+
+async def test_create_doctor_success(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    resp = await client.post(
+        ADMIN_DOCTORS_URL,
+        headers=auth_headers_admin,
+        json={
+            "email": "new_doctor@test.com",
+            "first_name": "Иван",
+            "last_name": "Петров",
+            "phone": "+79001234567",
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["email"] == "new_doctor@test.com"
+    assert data["first_name"] == "Иван"
+    assert data["last_name"] == "Петров"
+    assert data["status"] == "approved"
+    assert data["profile_id"] is not None
+    assert data["user_id"] is not None
+    assert data["temp_password"] is None
+
+
+async def test_create_doctor_no_invite_returns_password(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    resp = await client.post(
+        ADMIN_DOCTORS_URL,
+        headers=auth_headers_admin,
+        json={
+            "email": "noinvite@test.com",
+            "first_name": "Анна",
+            "last_name": "Сидорова",
+            "phone": "+79005555555",
+            "send_invite": False,
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["temp_password"] is not None
+    assert len(data["temp_password"]) >= 8
+
+
+async def test_create_doctor_full_fields(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    resp = await client.post(
+        ADMIN_DOCTORS_URL,
+        headers=auth_headers_admin,
+        json={
+            "email": "full_doctor@test.com",
+            "first_name": "Мария",
+            "last_name": "Козлова",
+            "phone": "+79009876543",
+            "middle_name": "Андреевна",
+            "clinic_name": "Клиника Здоровья",
+            "position": "Трихолог",
+            "academic_degree": "к.м.н.",
+            "bio": "Опытный трихолог",
+            "public_email": "maria@clinic.com",
+            "public_phone": "+79009876544",
+            "status": "pending_review",
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["status"] == "pending_review"
+    assert data["first_name"] == "Мария"
+
+
+async def test_create_doctor_duplicate_email(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    from tests.factories import create_user
+
+    await create_user(db_session, email="duplicate@test.com")
+    await db_session.commit()
+
+    resp = await client.post(
+        ADMIN_DOCTORS_URL,
+        headers=auth_headers_admin,
+        json={
+            "email": "duplicate@test.com",
+            "first_name": "Тест",
+            "last_name": "Дубль",
+            "phone": "+79001111111",
+        },
+    )
+    assert resp.status_code == 409
+
+
+async def test_create_doctor_forbidden_for_manager(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    from tests.factories import create_role, create_user, assign_role
+
+    user = await create_user(db_session, email="mgr@test.com")
+    role = await create_role(db_session, name="manager")
+    await assign_role(db_session, user, role)
+    await db_session.flush()
+
+    headers = _make_auth_headers(user.id, "manager")
+    resp = await client.post(
+        ADMIN_DOCTORS_URL,
+        headers=headers,
+        json={
+            "email": "blocked@test.com",
+            "first_name": "Блок",
+            "last_name": "Тест",
+            "phone": "+79002222222",
+        },
+    )
+    assert resp.status_code == 403
+
+
+async def test_create_doctor_unauthorized(client: AsyncClient):
+    resp = await client.post(
+        ADMIN_DOCTORS_URL,
+        json={
+            "email": "noauth@test.com",
+            "first_name": "А",
+            "last_name": "Б",
+            "phone": "+79003333333",
+        },
+    )
+    assert resp.status_code == 401
+
+
+# ── List doctors tests ────────────────────────────────────────────
 
 
 async def test_admin_list_requires_auth(client: AsyncClient):

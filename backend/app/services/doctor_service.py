@@ -14,16 +14,19 @@ from sqlalchemy import Select, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
-from app.core.exceptions import NotFoundError
+from app.core.config import settings
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.security import hash_password
 from app.models.profiles import (
     DoctorProfile,
     DoctorProfileChange,
+    DoctorSpecialization,
     ModerationHistory,
 )
 from app.models.subscriptions import Payment, Subscription
 from app.models.users import Role, User, UserRoleAssignment
 from app.schemas.doctor_admin import (
+    AdminCreateDoctorResponse,
     CityNested,
     DoctorDetailResponse,
     DoctorListItemResponse,
@@ -39,6 +42,7 @@ from app.schemas.doctor_admin import (
 )
 from app.tasks.email_tasks import (
     send_custom_email,
+    send_doctor_invite_email,
     send_draft_result_notification,
     send_moderation_result_notification,
     send_reminder_notification,
@@ -61,6 +65,85 @@ class DoctorAdminService:
         if not profile:
             raise NotFoundError("Doctor profile not found")
         return profile
+
+    # ── 0. create doctor (manual) ─────────────────────────────────
+
+    async def create_doctor(self, data: dict[str, Any]) -> AdminCreateDoctorResponse:
+        existing = await self.db.execute(
+            select(User.id).where(User.email == data["email"])
+        )
+        if existing.scalar_one_or_none():
+            raise ConflictError("User with this email already exists")
+
+        doctor_role = (
+            await self.db.execute(select(Role).where(Role.name == "doctor"))
+        ).scalar_one_or_none()
+        if not doctor_role:
+            raise NotFoundError("Role 'doctor' not found in database")
+
+        temp_password = f"Tmp{uuid4().hex[:12]}!"
+
+        user = User(
+            email=data["email"],
+            password_hash=hash_password(temp_password),
+            email_verified_at=datetime.now(UTC),
+            is_active=True,
+        )
+        self.db.add(user)
+        await self.db.flush()
+
+        self.db.add(UserRoleAssignment(user_id=user.id, role_id=doctor_role.id))
+
+        profile = DoctorProfile(
+            user_id=user.id,
+            first_name=data["first_name"],
+            last_name=data["last_name"],
+            phone=data["phone"],
+            middle_name=data.get("middle_name"),
+            city_id=data.get("city_id"),
+            clinic_name=data.get("clinic_name"),
+            position=data.get("position"),
+            academic_degree=data.get("academic_degree"),
+            bio=data.get("bio"),
+            public_email=data.get("public_email"),
+            public_phone=data.get("public_phone"),
+            status=data.get("status", "approved"),
+        )
+        self.db.add(profile)
+        await self.db.flush()
+
+        spec_ids = data.get("specialization_ids") or []
+        for sid in spec_ids:
+            self.db.add(
+                DoctorSpecialization(
+                    doctor_profile_id=profile.id,
+                    specialization_id=sid,
+                )
+            )
+
+        await self.db.commit()
+
+        if data.get("send_invite", True):
+            await send_doctor_invite_email.kiq(
+                data["email"], temp_password, settings.FRONTEND_URL
+            )
+
+        logger.info(
+            "doctor_created_by_admin",
+            user_id=str(user.id),
+            profile_id=str(profile.id),
+            email=data["email"],
+        )
+
+        return AdminCreateDoctorResponse(
+            user_id=user.id,
+            profile_id=profile.id,
+            email=user.email,
+            first_name=profile.first_name,
+            last_name=profile.last_name,
+            status=profile.status,
+            temp_password=temp_password if not data.get("send_invite", True) else None,
+        )
 
     # ── 1. list doctors ───────────────────────────────────────────
 

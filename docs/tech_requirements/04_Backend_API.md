@@ -731,6 +731,58 @@ app/
 
 ---
 
+#### POST /api/v1/admin/doctors
+
+**Назначение:** Ручное создание врача администратором  
+**Доступ:** Admin
+
+**Request body (JSON):**
+
+| Поле | Тип | Обязательное | Описание |
+|------|-----|:---:|----------|
+| email | string (email) | да | Email аккаунта |
+| first_name | string | да | Имя |
+| last_name | string | да | Фамилия |
+| phone | string | да | Телефон |
+| middle_name | string | нет | Отчество |
+| city_id | uuid | нет | ID города |
+| clinic_name | string | нет | Клиника |
+| position | string | нет | Должность |
+| academic_degree | string | нет | Учёная степень |
+| bio | string | нет | Биография |
+| public_email | string | нет | Публичный email |
+| public_phone | string | нет | Публичный телефон |
+| specialization_ids | uuid[] | нет | Массив ID специализаций |
+| status | string | нет | `approved` (default) или `pending_review` |
+| send_invite | bool | нет | Отправить приглашение на email (`true` по умолчанию) |
+
+**Response 201:**
+```json
+{
+  "user_id": "uuid",
+  "profile_id": "uuid",
+  "email": "doctor@example.com",
+  "first_name": "Иван",
+  "last_name": "Петров",
+  "status": "approved",
+  "temp_password": null
+}
+```
+
+> `temp_password` возвращается только при `send_invite=false`.
+
+**Ошибки:** 401, 403, 409 (email занят), 422
+
+**Бизнес-логика:**
+1. Проверить уникальность email
+2. Создать `User` с временным паролем, email_verified_at = now
+3. Назначить роль `doctor`
+4. Создать `DoctorProfile` со всеми переданными полями
+5. Если `specialization_ids` — создать записи `DoctorSpecialization`
+6. Если `send_invite=true` — отправить email с логином и паролем через TaskIQ
+
+---
+
 #### GET /api/v1/admin/doctors
 
 **Назначение:** Список врачей с фильтрами и пагинацией  

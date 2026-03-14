@@ -14,6 +14,8 @@ from app.core.redis import get_redis
 from app.core.security import require_role
 from app.schemas.auth import MessageResponse
 from app.schemas.doctor_admin import (
+    AdminCreateDoctorRequest,
+    AdminCreateDoctorResponse,
     ApproveDraftRequest,
     DoctorDetailResponse,
     DoctorListItemResponse,
@@ -72,6 +74,28 @@ async def list_doctors(
         sort_by=sort_by,
         sort_order=sort_order,
     )
+
+
+@router.post(
+    "/doctors",
+    response_model=AdminCreateDoctorResponse,
+    status_code=201,
+    summary="Создать врача вручную",
+    responses=error_responses(401, 403, 409, 422),
+)
+async def create_doctor(
+    body: AdminCreateDoctorRequest,
+    payload: dict[str, Any] = ADMIN_ONLY,
+    db: AsyncSession = Depends(get_db_session),
+) -> AdminCreateDoctorResponse:
+    """Создаёт пользователя с ролью doctor и заполненным профилем.
+
+    - **401** — не авторизован
+    - **403** — роль не admin
+    - **409** — пользователь с таким email уже существует
+    """
+    svc = DoctorAdminService(db)
+    return await svc.create_doctor(body.model_dump())
 
 
 @router.get(

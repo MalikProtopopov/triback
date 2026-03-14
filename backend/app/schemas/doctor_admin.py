@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 # ── Nested helpers ────────────────────────────────────────────────
 
@@ -61,6 +61,52 @@ class ModerationHistoryNested(BaseModel):
     action: str
     comment: str | None = None
     created_at: datetime
+
+
+# ── Admin create doctor ───────────────────────────────────────────
+
+class AdminCreateDoctorRequest(BaseModel):
+    email: EmailStr
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    phone: str = Field(min_length=1, max_length=20)
+    middle_name: str | None = Field(None, max_length=100)
+    city_id: UUID | None = None
+    clinic_name: str | None = Field(None, max_length=255)
+    position: str | None = Field(None, max_length=255)
+    academic_degree: str | None = Field(None, max_length=255)
+    bio: str | None = None
+    public_email: str | None = Field(None, max_length=255)
+    public_phone: str | None = Field(None, max_length=20)
+    specialization_ids: list[UUID] | None = None
+    status: Literal["approved", "pending_review"] = "approved"
+    send_invite: bool = True
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "email": "doctor@example.com",
+                    "first_name": "Иван",
+                    "last_name": "Петров",
+                    "phone": "+79001234567",
+                    "city_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                    "clinic_name": "Клиника здоровья",
+                    "send_invite": True,
+                }
+            ]
+        }
+    }
+
+
+class AdminCreateDoctorResponse(BaseModel):
+    user_id: UUID
+    profile_id: UUID
+    email: str
+    first_name: str
+    last_name: str
+    status: str
+    temp_password: str | None = None
 
 
 # ── Doctor list ───────────────────────────────────────────────────

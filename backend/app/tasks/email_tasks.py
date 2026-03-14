@@ -193,6 +193,25 @@ async def send_event_verification_code(
 
 
 @broker.task  # type: ignore[misc]
+async def send_doctor_invite_email(
+    email: str, temp_password: str, frontend_url: str
+) -> None:
+    login_url = frontend_url.rstrip("/") + "/auth/login"
+    html = _wrap_html(
+        f"<h2 style='margin:0 0 16px;color:#1f2937;'>Добро пожаловать в {_BRAND}!</h2>"
+        f"<p style='color:#4b5563;line-height:1.6;'>Администратор создал для вас аккаунт врача. "
+        f"Используйте данные ниже для входа в личный кабинет.</p>"
+        f"<table style='margin:16px 0;width:100%;' cellpadding='8' cellspacing='0'>"
+        f"<tr><td style='color:#6b7280;'>Email:</td><td style='font-weight:bold;'>{email}</td></tr>"
+        f"<tr><td style='color:#6b7280;'>Пароль:</td><td style='font-weight:bold;'>{temp_password}</td></tr>"
+        f"</table>"
+        f"<p style='color:#4b5563;'>Рекомендуем сменить пароль после первого входа.</p>"
+        f"{_button(login_url, 'Войти в личный кабинет')}"
+    )
+    await send_smtp_email(email, f"Ваш аккаунт врача — {_BRAND}", html)
+
+
+@broker.task  # type: ignore[misc]
 async def send_guest_account_created(
     email: str, temp_password: str, event_title: str, frontend_url: str
 ) -> None:
