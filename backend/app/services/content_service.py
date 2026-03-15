@@ -8,9 +8,9 @@ from uuid import UUID
 
 import structlog
 from fastapi import UploadFile
-from sqlalchemy import and_, exists, func, select
+from sqlalchemy import and_, delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.core.utils import generate_unique_slug
@@ -142,8 +142,9 @@ class ContentAdminService:
     async def get_article(self, article_id: UUID) -> ArticleAdminDetailResponse:
         result = await self.db.execute(
             select(Article)
+            .execution_options(populate_existing=True)
             .options(
-                selectinload(Article.theme_assignments).selectinload(
+                selectinload(Article.theme_assignments).joinedload(
                     ArticleThemeAssignment.theme
                 )
             )
@@ -208,8 +209,11 @@ class ContentAdminService:
             )
 
         if theme_ids is not None:
-            for ta in list(article.theme_assignments):
-                await self.db.delete(ta)
+            await self.db.execute(
+                delete(ArticleThemeAssignment).where(
+                    ArticleThemeAssignment.article_id == article_id
+                )
+            )
             await self.db.flush()
             for tid in theme_ids:
                 self.db.add(ArticleThemeAssignment(article_id=article.id, theme_id=tid))
