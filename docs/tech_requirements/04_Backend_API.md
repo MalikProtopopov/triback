@@ -2893,7 +2893,10 @@ app/
 
 **Назначение:** Обновление документа организации  
 **Доступ:** Admin, Manager  
-**Request body:** `{ "title", "slug", "content", "sort_order", "is_active" }` — все поля optional
+**Content-Type:** multipart/form-data (flat Form параметры)  
+**Request body:** `title`, `slug`, `content`, `sort_order`, `is_active`, `file`, `remove_file` — все поля optional
+
+- `remove_file` (string) — передать `"true"` / `"1"` / `"yes"` чтобы удалить прикреплённый файл и очистить `file_url`. Если при этом передан новый `file`, загрузится новый файл (приоритет у замены).
 
 ---
 

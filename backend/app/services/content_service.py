@@ -427,6 +427,7 @@ class ContentAdminService:
         admin_id: UUID,
         data: dict[str, Any],
         file: UploadFile | None = None,
+        remove_file: bool = False,
     ) -> OrgDocDetailResponse:
         doc = await self.db.get(OrganizationDocument, doc_id)
         if not doc:
@@ -436,7 +437,10 @@ class ContentAdminService:
             if value is not None and hasattr(doc, field):
                 setattr(doc, field, value)
 
-        if file:
+        if remove_file and not file and doc.file_url:
+            await file_service.delete_file(doc.file_url)
+            doc.file_url = None
+        elif file:
             if doc.file_url:
                 await file_service.delete_file(doc.file_url)
             doc.file_url = await file_service.upload_file(

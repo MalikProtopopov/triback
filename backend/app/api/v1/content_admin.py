@@ -353,12 +353,14 @@ async def update_org_doc(
     slug: str | None = Form(None, max_length=255),
     sort_order: int | None = Form(None),
     is_active: bool | None = Form(None),
+    remove_file: str | None = Form(None, description="'true'/'1'/'yes' — удалить прикреплённый файл (file_url → null)"),
     file: UploadFile | None = File(None),
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> OrgDocDetailResponse:
     """Обновляет документ организации. Все поля optional.
 
+    - **remove_file=true** — удалить прикреплённый файл и очистить file_url
     - **404** — документ не найден
     """
     admin_id = UUID(payload["sub"])
@@ -374,7 +376,8 @@ async def update_org_doc(
         data["sort_order"] = sort_order
     if is_active is not None:
         data["is_active"] = is_active
-    return await svc.update_org_doc(doc_id, admin_id, data, file)
+    remove_file_flag = str(remove_file or "").lower() in ("true", "1", "yes", "on")
+    return await svc.update_org_doc(doc_id, admin_id, data, file, remove_file=remove_file_flag)
 
 
 @router.patch(
