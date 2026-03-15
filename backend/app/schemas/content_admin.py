@@ -1,7 +1,7 @@
 """Pydantic schemas for admin content management (articles, themes, org docs)."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -117,10 +117,25 @@ class OrgDocListItem(BaseModel):
     id: UUID
     title: str
     slug: str
+    content: str | None = None
     file_url: str | None = None
     sort_order: int
     is_active: bool
     updated_at: datetime | None = None
+
+
+class ContentBlockNested(BaseModel):
+    id: UUID
+    block_type: str
+    sort_order: int
+    title: str | None = None
+    content: str | None = None
+    media_url: str | None = None
+    thumbnail_url: str | None = None
+    link_url: str | None = None
+    link_label: str | None = None
+    device_type: str
+    block_metadata: dict[str, Any] | None = None
 
 
 class OrgDocDetailResponse(BaseModel):
@@ -134,6 +149,7 @@ class OrgDocDetailResponse(BaseModel):
     updated_by: UUID | None = None
     created_at: datetime
     updated_at: datetime | None = None
+    content_blocks: list[ContentBlockNested] = []
 
 
 class OrgDocReorderItem(BaseModel):

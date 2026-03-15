@@ -21,6 +21,7 @@ from app.schemas.public import (
     ArticleListItem,
     ArticleThemeListResponse,
     CityWithDoctorsResponse,
+    ContentBlockPublicNested,
     DoctorPublicDetailResponse,
     DoctorPublicListItem,
     EventPublicDetailResponse,
@@ -455,7 +456,7 @@ async def get_organization_document(
     """
     from sqlalchemy import select
 
-    from app.models.content import OrganizationDocument
+    from app.models.content import ContentBlock, OrganizationDocument
 
     result = await db.execute(
         select(OrganizationDocument).where(
@@ -468,12 +469,38 @@ async def get_organization_document(
         from app.core.exceptions import NotFoundError
 
         raise NotFoundError("Document not found")
+
+    blocks_result = await db.execute(
+        select(ContentBlock)
+        .where(
+            ContentBlock.entity_type == "organization_document",
+            ContentBlock.entity_id == doc.id,
+        )
+        .order_by(ContentBlock.sort_order.asc())
+    )
+    blocks = blocks_result.scalars().all()
+
     return OrgDocPublicDetailResponse(
         id=str(doc.id),
         title=doc.title,
         slug=doc.slug,
         content=doc.content,
         file_url=doc.file_url,
+        content_blocks=[
+            ContentBlockPublicNested(
+                id=str(b.id),
+                block_type=b.block_type,
+                sort_order=b.sort_order,
+                title=b.title,
+                content=b.content,
+                media_url=b.media_url,
+                thumbnail_url=b.thumbnail_url,
+                link_url=b.link_url,
+                link_label=b.link_label,
+                device_type=b.device_type,
+            )
+            for b in blocks
+        ],
     )
 
 

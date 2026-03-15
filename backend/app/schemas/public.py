@@ -256,12 +256,26 @@ class OrgDocPublicItem(BaseModel):
     file_url: str | None = None
 
 
+class ContentBlockPublicNested(BaseModel):
+    id: str
+    block_type: str
+    sort_order: int
+    title: str | None = None
+    content: str | None = None
+    media_url: str | None = None
+    thumbnail_url: str | None = None
+    link_url: str | None = None
+    link_label: str | None = None
+    device_type: str
+
+
 class OrgDocPublicDetailResponse(BaseModel):
     id: str
     title: str
     slug: str
     content: str | None = None
     file_url: str | None = None
+    content_blocks: list[ContentBlockPublicNested] = []
 
 
 class OrgDocPublicListResponse(BaseModel):

@@ -18,11 +18,13 @@ from app.models.content import (
     Article,
     ArticleTheme,
     ArticleThemeAssignment,
+    ContentBlock,
     OrganizationDocument,
 )
 from app.schemas.content_admin import (
     ArticleAdminDetailResponse,
     ArticleAdminListItem,
+    ContentBlockNested,
     OrgDocDetailResponse,
     OrgDocListItem,
     ThemeAdminResponse,
@@ -378,6 +380,7 @@ class ContentAdminService:
                 id=d.id,
                 title=d.title,
                 slug=d.slug,
+                content=d.content,
                 file_url=d.file_url,
                 sort_order=d.sort_order,
                 is_active=d.is_active,
@@ -416,7 +419,7 @@ class ContentAdminService:
         self.db.add(doc)
         await self.db.commit()
         await self.db.refresh(doc)
-        return self._org_doc_detail(doc)
+        return await self._org_doc_detail(doc)
 
     async def update_org_doc(
         self,
@@ -446,7 +449,7 @@ class ContentAdminService:
         doc.updated_by = admin_id
         await self.db.commit()
         await self.db.refresh(doc)
-        return self._org_doc_detail(doc)
+        return await self._org_doc_detail(doc)
 
     async def delete_org_doc(self, doc_id: UUID) -> None:
         doc = await self.db.get(OrganizationDocument, doc_id)
@@ -471,11 +474,20 @@ class ContentAdminService:
             result.append(doc)
         await self.db.commit()
         return [
-            self._org_doc_detail(d)
+            await self._org_doc_detail(d)
             for d in sorted(result, key=lambda d: d.sort_order)
         ]
 
-    def _org_doc_detail(self, d: OrganizationDocument) -> OrgDocDetailResponse:
+    async def _org_doc_detail(self, d: OrganizationDocument) -> OrgDocDetailResponse:
+        blocks_q = (
+            select(ContentBlock)
+            .where(
+                ContentBlock.entity_type == "organization_document",
+                ContentBlock.entity_id == d.id,
+            )
+            .order_by(ContentBlock.sort_order.asc())
+        )
+        blocks = (await self.db.execute(blocks_q)).scalars().all()
         return OrgDocDetailResponse(
             id=d.id,
             title=d.title,
@@ -487,4 +499,20 @@ class ContentAdminService:
             updated_by=d.updated_by,
             created_at=d.created_at,
             updated_at=d.updated_at,
+            content_blocks=[
+                ContentBlockNested(
+                    id=b.id,
+                    block_type=b.block_type,
+                    sort_order=b.sort_order,
+                    title=b.title,
+                    content=b.content,
+                    media_url=b.media_url,
+                    thumbnail_url=b.thumbnail_url,
+                    link_url=b.link_url,
+                    link_label=b.link_label,
+                    device_type=b.device_type,
+                    block_metadata=b.block_metadata,
+                )
+                for b in blocks
+            ],
         )
