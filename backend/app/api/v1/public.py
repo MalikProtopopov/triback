@@ -20,12 +20,14 @@ from app.schemas.public import (
     ArticleDetailResponse,
     ArticleListItem,
     ArticleThemeListResponse,
+    CityWithDoctorsResponse,
     DoctorPublicDetailResponse,
     DoctorPublicListItem,
     EventPublicDetailResponse,
     EventPublicListItem,
     GalleryListResponse,
     OrgDocPublicListResponse,
+    OrgDocPublicDetailResponse,
     RecordingListResponse,
 )
 from app.schemas.seo import SeoPageResponse
@@ -50,6 +52,25 @@ async def list_cities(
     считает количество активных врачей в каждом городе."""
     svc = PublicService(db, redis)
     return await svc.list_cities(with_doctors=with_doctors)
+
+
+@router.get(
+    "/cities/{slug}",
+    response_model=CityWithDoctorsResponse,
+    summary="Город по slug",
+    responses=error_responses(404),
+)
+async def get_city(
+    slug: str,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> CityWithDoctorsResponse:
+    """Информация о городе по slug (включая количество врачей).
+
+    - **404** — город не найден
+    """
+    svc = PublicService(db, redis)
+    return await svc.get_city(slug)
 
 
 # ── Doctors (public catalog) ─────────────────────────────────────
@@ -82,22 +103,22 @@ async def list_doctors(
 
 
 @router.get(
-    "/doctors/{profile_id}",
+    "/doctors/{identifier}",
     response_model=DoctorPublicDetailResponse,
     summary="Профиль врача",
     responses=error_responses(404),
 )
 async def get_doctor(
-    profile_id: UUID,
+    identifier: str,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> DoctorPublicDetailResponse:
-    """Детальная карточка врача по UUID.
+    """Детальная карточка врача по UUID или slug.
 
     - **404** — врач не найден или неактивен
     """
     svc = PublicService(db, redis)
-    return await svc.get_doctor(profile_id)
+    return await svc.get_doctor(identifier)
 
 
 # ── Events ────────────────────────────────────────────────────────
@@ -416,6 +437,44 @@ async def list_organization_documents(
             for d in docs
         ]
     }
+
+
+@router.get(
+    "/organization-documents/{slug}",
+    response_model=OrgDocPublicDetailResponse,
+    summary="Документ организации по slug",
+    responses=error_responses(404),
+)
+async def get_organization_document(
+    slug: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> OrgDocPublicDetailResponse:
+    """Детальная страница документа организации по slug.
+
+    - **404** — документ не найден
+    """
+    from sqlalchemy import select
+
+    from app.models.content import OrganizationDocument
+
+    result = await db.execute(
+        select(OrganizationDocument).where(
+            OrganizationDocument.slug == slug,
+            OrganizationDocument.is_active.is_(True),
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        from app.core.exceptions import NotFoundError
+
+        raise NotFoundError("Document not found")
+    return OrgDocPublicDetailResponse(
+        id=str(doc.id),
+        title=doc.title,
+        slug=doc.slug,
+        content=doc.content,
+        file_url=doc.file_url,
+    )
 
 
 # ── SEO (for frontend SSR) ──────────────────────────────────────

@@ -93,7 +93,7 @@ class SettingsAdminService:
         if existing:
             raise ConflictError(f"Город '{data['name']}' уже существует")
 
-        slug = await generate_unique_slug(self.db, City, data["name"])
+        slug = data.get("slug") or await generate_unique_slug(self.db, City, data["name"])
 
         city = City(
             name=data["name"],
@@ -128,9 +128,13 @@ class SettingsAdminService:
             if dup:
                 raise ConflictError(f"Город '{new_name}' уже существует")
             city.name = new_name
-            city.slug = await generate_unique_slug(
-                self.db, City, new_name, existing_id=city_id
-            )
+            if not data.get("slug"):
+                city.slug = await generate_unique_slug(
+                    self.db, City, new_name, existing_id=city_id
+                )
+
+        if data.get("slug"):
+            city.slug = data["slug"]
 
         if data.get("sort_order") is not None:
             city.sort_order = data["sort_order"]

@@ -75,6 +75,7 @@ async def list_events(
 )
 async def create_event(
     title: str = Form(..., max_length=500),
+    slug: str | None = Form(None, max_length=500),
     event_date: datetime = Form(...),
     description: str | None = Form(None),
     event_end_date: datetime | None = Form(None),
@@ -93,7 +94,7 @@ async def create_event(
     svc = EventsAdminService(db)
     return await svc.create_event(
         admin_id,
-        title=title, description=description, event_date=event_date,
+        title=title, slug=slug, description=description, event_date=event_date,
         event_end_date=event_end_date, location=location, status=status,
         cover_image=cover_image,
     )
@@ -127,6 +128,7 @@ async def get_event(
 async def update_event(
     event_id: UUID,
     title: str | None = Form(None),
+    slug: str | None = Form(None),
     description: str | None = Form(None),
     event_date: datetime | None = Form(None),
     event_end_date: datetime | None = Form(None),
@@ -143,6 +145,8 @@ async def update_event(
     data: dict[str, Any] = {}
     if title is not None:
         data["title"] = title
+    if slug is not None:
+        data["slug"] = slug
     if description is not None:
         data["description"] = description
     if event_date is not None:

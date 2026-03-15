@@ -256,5 +256,13 @@ class OrgDocPublicItem(BaseModel):
     file_url: str | None = None
 
 
+class OrgDocPublicDetailResponse(BaseModel):
+    id: str
+    title: str
+    slug: str
+    content: str | None = None
+    file_url: str | None = None
+
+
 class OrgDocPublicListResponse(BaseModel):
     data: list[OrgDocPublicItem]

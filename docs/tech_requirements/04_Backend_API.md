@@ -2,7 +2,7 @@
 
 ## Проект: «Ассоциация трихологов»
 
-> **Актуализировано 2026-03-12.** Бекенд полностью реализован и задеплоен.
+> **Актуализировано 2026-03-14.** Бекенд полностью реализован и задеплоен. Добавлена полная поддержка slug для SEO.
 > Swagger (тест): `https://trihoback.mediann.dev/docs`
 > Справочные документы: `docs/FRONTEND_API_HANDOFF.md`, `docs/BACKEND_VS_SPEC_GAP_ANALYSIS.md`
 
@@ -1413,10 +1413,11 @@ app/
 
 ---
 
-#### GET /api/v1/doctors/{doctor_profile_id}
+#### GET /api/v1/doctors/{identifier}
 
-**Назначение:** Публичный профиль конкретного врача  
-**Доступ:** Guest
+**Назначение:** Публичный профиль конкретного врача по UUID **или slug**  
+**Доступ:** Guest  
+**Параметр:** `identifier` — UUID профиля или его slug (строка)
 
 **Response 200:**
 ```json
@@ -1449,8 +1450,9 @@ app/
 
 **Response 404:** если профиль не публичный или не существует.
 
-**Бизнес-логика:** Те же правила видимости, что и для каталога — врач показывается только при `status = 'active'`, активной подписке и `is_public = true`.
-- Поле `slug` заполнено только у одобренных профилей (`slug IS NOT NULL`). URL строится по slug; если slug отсутствует — fallback на UUID.
+**Бизнес-логика:** Те же правила видимости, что и для каталога — врач показывается только при `status = 'active'`.
+- Параметр `identifier` автоматически определяется: если это валидный UUID — поиск по `id`; иначе — поиск по `slug`.
+- Поле `slug` обязательно (NOT NULL). URL строится по slug.
 - SEO-объект формируется на бекенде: приоритет — данные из `pages_seo`; fallback — шаблон из профиля.
 
 ---
@@ -1879,6 +1881,7 @@ app/
 ```json
 {
   "title": "string (required, max 500)",
+  "slug": "string | null (optional, auto-generated from title if empty)",
   "description": "string (optional, HTML)",
   "event_date": "datetime (required, ISO 8601)",
   "event_end_date": "datetime (optional)",
@@ -1894,13 +1897,13 @@ app/
   "id": "uuid",
   "title": "Конференция 2026",
   "slug": "konferenciya-2026",
-  "status": "draft",
+  "status": "upcoming",
   "created_at": "2026-03-02T14:30:00Z"
 }
 ```
 
 **Бизнес-логика:**
-1. Автогенерация slug из title (транслитерация, уникальность)
+1. Автогенерация slug из title (транслитерация, уникальность), если slug не передан вручную
 2. Загрузить cover_image в S3: `events/{event_id}/cover.jpg`
 3. Создать запись в `events`
 
@@ -1911,7 +1914,7 @@ app/
 **Назначение:** Обновление мероприятия  
 **Доступ:** Admin, Manager
 
-**Request body:** (аналогично POST, все поля optional)
+**Request body:** (аналогично POST, все поля optional, включая `slug`)
 
 **Response 200:** обновлённый объект мероприятия
 
@@ -2726,23 +2729,24 @@ app/
 **Назначение:** Создание статьи  
 **Доступ:** Admin, Manager
 
-**Request:** `multipart/form-data`
+**Request:** `application/json`
 ```json
 {
   "title": "string (required)",
+  "slug": "string | null (optional, auto-generated from title if empty)",
   "content": "string (required, HTML)",
   "excerpt": "string (optional)",
   "status": "string (optional, default: draft)",
   "seo_title": "string (optional)",
   "seo_description": "string (optional)",
-  "cover_image": "file (optional)"
+  "theme_ids": ["uuid", "..."]
 }
 ```
 
 **Response 201:** объект статьи
 
 **Бизнес-логика:**
-1. Автогенерация slug из title
+1. Автогенерация slug из title, если slug не передан вручную
 2. Если status=`published` → установить `published_at = now()`
 
 ---
@@ -2870,23 +2874,26 @@ app/
 **Назначение:** Создание документа организации  
 **Доступ:** Admin, Manager
 
-**Request:** `multipart/form-data`
+**Request:** `application/json`
 ```json
 {
   "title": "string (required)",
+  "slug": "string | null (optional, auto-generated from title if empty)",
   "content": "string (optional, HTML — WYSIWYG)",
-  "file": "file (optional, PDF, max 20MB)",
   "sort_order": "integer (optional)",
   "is_active": "boolean (optional, default: true)"
 }
 ```
+
+**Бизнес-логика:** Автогенерация slug из title, если slug не передан вручную.
 
 ---
 
 #### PATCH /api/v1/admin/organization-documents/{doc_id}
 
 **Назначение:** Обновление документа организации  
-**Доступ:** Admin, Manager
+**Доступ:** Admin, Manager  
+**Request body:** `{ "title", "slug", "content", "sort_order", "is_active" }` — все поля optional
 
 ---
 
@@ -2988,8 +2995,8 @@ app/
 **Публичный API:** блоки возвращаются в поле `content_blocks` при запросе:
 - `GET /api/v1/articles/{slug}`
 - `GET /api/v1/events/{event_slug}`
-- `GET /api/v1/doctors/{id}`
-- `GET /api/v1/organization-documents/{slug}` *(добавить endpoint для одиночного документа)*
+- `GET /api/v1/doctors/{identifier}` (UUID или slug)
+- `GET /api/v1/organization-documents/{slug}`
 
 ---
 
@@ -3115,6 +3122,7 @@ app/
 ```json
 {
   "name": "string (required, unique)",
+  "slug": "string | null (optional, auto-generated if empty)",
   "sort_order": "integer (optional)"
 }
 ```
@@ -3124,7 +3132,8 @@ app/
 #### PATCH /api/v1/admin/cities/{city_id}
 
 **Назначение:** Обновление города  
-**Доступ:** Admin, Manager
+**Доступ:** Admin, Manager  
+**Request body:** `{ "name", "slug", "sort_order", "is_active" }` — все поля optional
 
 ---
 
@@ -3172,6 +3181,25 @@ app/
 **Бизнес-логика (with_doctors=true):** Выборка `city_id` из `doctor_profiles` JOIN `subscriptions` WHERE `subscriptions.status = 'active'` AND `doctor_profiles.status = 'active'`. GROUP BY city, фильтр `doctors_count > 0`. Кеш Redis 5 мин.
 
 > **Deprecated:** `GET /api/v1/cities-with-doctors` — использовать `GET /api/v1/cities?with_doctors=true`
+
+---
+
+#### GET /api/v1/cities/{slug}
+
+**Назначение:** Информация о городе по slug (включая количество врачей)  
+**Доступ:** Guest
+
+**Response 200:**
+```json
+{
+  "id": "uuid",
+  "name": "Москва",
+  "slug": "moskva",
+  "doctors_count": 12
+}
+```
+
+**Response 404:** Город с таким slug не найден.
 
 ---
 

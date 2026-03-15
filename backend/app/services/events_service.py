@@ -136,6 +136,7 @@ class EventsAdminService:
         admin_id: UUID,
         *,
         title: str,
+        slug: str | None = None,
         description: str | None = None,
         event_date: datetime,
         event_end_date: datetime | None = None,
@@ -143,7 +144,7 @@ class EventsAdminService:
         status: str = "upcoming",
         cover_image: UploadFile | None = None,
     ) -> EventCreatedResponse:
-        slug = await generate_unique_slug(self.db, Event, title)
+        slug = slug or await generate_unique_slug(self.db, Event, title)
 
         cover_url: str | None = None
         if cover_image:

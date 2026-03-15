@@ -102,7 +102,7 @@ class ContentAdminService:
         data: dict[str, Any],
         cover_image: UploadFile | None = None,
     ) -> ArticleAdminDetailResponse:
-        slug = await generate_unique_slug(self.db, Article, data["title"])
+        slug = data.pop("slug", None) or await generate_unique_slug(self.db, Article, data["title"])
 
         cover_url: str | None = None
         if cover_image:
@@ -389,7 +389,7 @@ class ContentAdminService:
         data: dict[str, Any],
         file: UploadFile | None = None,
     ) -> OrgDocDetailResponse:
-        slug = await generate_unique_slug(self.db, OrganizationDocument, data["title"])
+        slug = data.pop("slug", None) or await generate_unique_slug(self.db, OrganizationDocument, data["title"])
 
         file_url: str | None = None
         if file:

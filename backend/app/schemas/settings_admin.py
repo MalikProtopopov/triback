@@ -19,11 +19,13 @@ class SettingsUpdateRequest(BaseModel):
 
 class CityCreateRequest(BaseModel):
     name: str = Field(max_length=255)
+    slug: str | None = Field(None, max_length=255)
     sort_order: int = 0
 
 
 class CityUpdateRequest(BaseModel):
     name: str | None = Field(None, max_length=255)
+    slug: str | None = Field(None, max_length=255)
     sort_order: int | None = None
     is_active: bool | None = None
 

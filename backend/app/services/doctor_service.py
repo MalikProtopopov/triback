@@ -17,6 +17,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.security import hash_password
+from app.core.utils import generate_unique_slug
 from app.models.profiles import (
     DoctorProfile,
     DoctorProfileChange,
@@ -94,6 +95,10 @@ class DoctorAdminService:
 
         self.db.add(UserRoleAssignment(user_id=user.id, role_id=doctor_role.id))
 
+        slug = await generate_unique_slug(
+            self.db, DoctorProfile, f"{data['last_name']} {data['first_name']}"
+        )
+
         profile = DoctorProfile(
             user_id=user.id,
             first_name=data["first_name"],
@@ -108,6 +113,7 @@ class DoctorAdminService:
             public_email=data.get("public_email"),
             public_phone=data.get("public_phone"),
             status=data.get("status", "approved"),
+            slug=slug,
         )
         self.db.add(profile)
         await self.db.flush()
@@ -493,6 +499,11 @@ class DoctorAdminService:
         new_status = "approved" if action == "approve" else "rejected"
         dp.status = new_status  # type: ignore[assignment]
 
+        if action == "approve" and not dp.slug:
+            dp.slug = await generate_unique_slug(
+                self.db, DoctorProfile, f"{dp.last_name} {dp.first_name}"
+            )
+
         self.db.add(
             ModerationHistory(
                 admin_id=admin_id,
@@ -673,12 +684,18 @@ class DoctorAdminService:
                     self.db.add(user)
                     await self.db.flush()
 
+                    imp_slug = await generate_unique_slug(
+                        self.db,
+                        DoctorProfile,
+                        f"{last_name or 'N-A'} {first_name or 'N-A'}",
+                    )
                     profile = DoctorProfile(
                         user_id=user.id,
                         first_name=first_name or "N/A",
                         last_name=last_name or "N/A",
                         phone=phone or "",
                         status="approved",
+                        slug=imp_slug,
                     )
                     self.db.add(profile)
                     await self.db.flush()

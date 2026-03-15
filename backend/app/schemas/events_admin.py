@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class EventCreateRequest(BaseModel):
     title: str = Field(max_length=500)
+    slug: str | None = Field(None, max_length=500)
     description: str | None = None
     event_date: datetime
     event_end_date: datetime | None = None
@@ -19,6 +20,7 @@ class EventCreateRequest(BaseModel):
 
 class EventUpdateRequest(BaseModel):
     title: str | None = Field(None, max_length=500)
+    slug: str | None = Field(None, max_length=500)
     description: str | None = None
     event_date: datetime | None = None
     event_end_date: datetime | None = None

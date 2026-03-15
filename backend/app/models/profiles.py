@@ -62,7 +62,6 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
             "uix_doctor_profiles_slug",
             "slug",
             unique=True,
-            postgresql_where="slug IS NOT NULL",
         ),
     )
 
@@ -96,7 +95,7 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     registration_address: Mapped[str | None] = mapped_column(Text)
     diploma_photo_url: Mapped[str | None] = mapped_column(String(500))
-    slug: Mapped[str | None] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(255), nullable=False)
     colleague_contacts: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped["User"] = relationship(back_populates="doctor_profile")  # type: ignore[name-defined]  # noqa: F821

@@ -100,6 +100,25 @@ class PublicService:
             for r in rows
         ]
 
+    async def get_city(self, slug: str) -> CityWithDoctorsResponse:
+        doctor_count = (
+            func.count(DoctorProfile.id)
+            .filter(DoctorProfile.status == "active")
+            .label("doctors_count")
+        )
+        q = (
+            select(City.id, City.name, City.slug, doctor_count)
+            .outerjoin(DoctorProfile, DoctorProfile.city_id == City.id)
+            .where(and_(City.is_active.is_(True), City.slug == slug))
+            .group_by(City.id)
+        )
+        row = (await self.db.execute(q)).one_or_none()
+        if not row:
+            raise NotFoundError("City not found")
+        return CityWithDoctorsResponse(
+            id=row.id, name=row.name, slug=row.slug, doctors_count=row.doctors_count
+        )
+
     # ── Doctors (public catalog) ──────────────────────────────────
 
     async def list_doctors(
@@ -188,7 +207,13 @@ class PublicService:
             slug=dp.slug,
         )
 
-    async def get_doctor(self, profile_id: UUID) -> DoctorPublicDetailResponse:
+    async def get_doctor(self, identifier: str) -> DoctorPublicDetailResponse:
+        try:
+            uid = UUID(identifier)
+            id_filter = DoctorProfile.id == uid
+        except (ValueError, AttributeError):
+            id_filter = DoctorProfile.slug == identifier
+
         result = await self.db.execute(
             select(DoctorProfile)
             .options(
@@ -197,7 +222,7 @@ class PublicService:
             )
             .where(
                 and_(
-                    DoctorProfile.id == profile_id,
+                    id_filter,
                     DoctorProfile.status == "active",
                 )
             )
