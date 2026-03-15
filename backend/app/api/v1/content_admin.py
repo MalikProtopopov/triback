@@ -1,9 +1,10 @@
 """Admin endpoints for content management (articles, themes, org documents)."""
 
-from typing import Any
+import json
+from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -13,13 +14,9 @@ from app.core.security import require_role
 from app.schemas.content_admin import (
     ArticleAdminDetailResponse,
     ArticleAdminListItem,
-    ArticleCreateRequest,
-    ArticleUpdateRequest,
-    OrgDocCreateRequest,
     OrgDocDetailResponse,
     OrgDocListItem,
     OrgDocReorderRequest,
-    OrgDocUpdateRequest,
     ThemeAdminListResponse,
     ThemeAdminResponse,
     ThemeCreateRequest,
@@ -31,6 +28,22 @@ router = APIRouter(prefix="/admin")
 
 ADMIN_MANAGER = require_role("admin", "manager")
 ADMIN_ONLY = require_role("admin")
+
+
+def _parse_theme_ids(theme_ids: str | None) -> list[UUID]:
+    """Parse theme_ids JSON string from FormData into a list of UUIDs."""
+    if not theme_ids or not theme_ids.strip():
+        return []
+    try:
+        parsed = json.loads(theme_ids)
+        if not isinstance(parsed, list):
+            raise ValueError("theme_ids must be a JSON array")
+        return [UUID(x) if isinstance(x, str) else x for x in parsed]
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid theme_ids JSON: {exc}",
+        ) from exc
 
 
 # ══ Articles ══════════════════════════════════════════════════════
@@ -68,19 +81,37 @@ async def list_articles(
     responses=error_responses(401, 403, 422),
 )
 async def create_article(
-    body: ArticleCreateRequest,
+    title: str = Form(..., max_length=500),
+    content: str = Form(...),
+    slug: str | None = Form(None, max_length=500),
+    excerpt: str | None = Form(None),
+    status: Literal["draft", "published", "archived"] = Form("draft"),
+    seo_title: str | None = Form(None, max_length=255),
+    seo_description: str | None = Form(None),
+    theme_ids: str | None = Form(None, description='JSON-массив UUID: \'["uuid1","uuid2"]\''),
+    cover_image: UploadFile | None = File(None),
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
-    cover_image: UploadFile | None = File(None),
 ) -> ArticleAdminDetailResponse:
-    """Создаёт статью. Обложка загружается через multipart.
+    """Создаёт статью. Все поля передаются как плоские поля multipart/form-data.
 
+    - `theme_ids` — JSON-строка: `'["uuid1","uuid2"]'`
     - **401** — не авторизован
     - **403** — роль не admin/manager
     """
     admin_id = UUID(payload["sub"])
     svc = ContentAdminService(db)
-    return await svc.create_article(admin_id, body.model_dump(), cover_image)
+    data = {
+        "title": title,
+        "content": content,
+        "slug": slug or None,
+        "excerpt": excerpt or None,
+        "status": status,
+        "seo_title": seo_title or None,
+        "seo_description": seo_description or None,
+        "theme_ids": _parse_theme_ids(theme_ids),
+    }
+    return await svc.create_article(admin_id, data, cover_image)
 
 
 @router.get(
@@ -110,17 +141,42 @@ async def get_article(
 )
 async def update_article(
     article_id: UUID,
-    body: ArticleUpdateRequest,
+    title: str | None = Form(None, max_length=500),
+    content: str | None = Form(None),
+    slug: str | None = Form(None, max_length=500),
+    excerpt: str | None = Form(None),
+    status: Literal["draft", "published", "archived"] | None = Form(None),
+    seo_title: str | None = Form(None, max_length=255),
+    seo_description: str | None = Form(None),
+    theme_ids: str | None = Form(None, description='JSON-массив UUID: \'["uuid1","uuid2"]\''),
+    cover_image: UploadFile | None = File(None),
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
-    cover_image: UploadFile | None = File(None),
 ) -> ArticleAdminDetailResponse:
-    """Обновляет поля статьи. Можно отправлять только изменённые поля.
+    """Обновляет поля статьи. Все поля — плоские поля multipart/form-data, все optional.
 
+    - `theme_ids` — JSON-строка: `'["uuid1","uuid2"]'` (передать пустой массив `'[]'` чтобы снять все темы)
     - **404** — статья не найдена
     """
     svc = ContentAdminService(db)
-    return await svc.update_article(article_id, body.model_dump(exclude_none=True), cover_image)
+    data: dict[str, Any] = {}
+    if title is not None:
+        data["title"] = title
+    if content is not None:
+        data["content"] = content
+    if slug is not None:
+        data["slug"] = slug
+    if excerpt is not None:
+        data["excerpt"] = excerpt
+    if status is not None:
+        data["status"] = status
+    if seo_title is not None:
+        data["seo_title"] = seo_title
+    if seo_description is not None:
+        data["seo_description"] = seo_description
+    if theme_ids is not None:
+        data["theme_ids"] = _parse_theme_ids(theme_ids)
+    return await svc.update_article(article_id, data, cover_image)
 
 
 @router.delete(
@@ -258,19 +314,30 @@ async def list_org_docs(
     responses=error_responses(401, 403, 422),
 )
 async def create_org_doc(
-    body: OrgDocCreateRequest,
+    title: str = Form(..., max_length=500),
+    content: str | None = Form(None),
+    slug: str | None = Form(None, max_length=255),
+    sort_order: int = Form(0),
+    is_active: bool = Form(True),
+    file: UploadFile | None = File(None),
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
-    file: UploadFile | None = File(None),
 ) -> OrgDocDetailResponse:
-    """Создаёт документ организации. Файл загружается через multipart.
+    """Создаёт документ организации. Все поля — плоские поля multipart/form-data.
 
     - **401** — не авторизован
     - **403** — роль не admin/manager
     """
     admin_id = UUID(payload["sub"])
     svc = ContentAdminService(db)
-    return await svc.create_org_doc(admin_id, body.model_dump(), file)
+    data = {
+        "title": title,
+        "content": content or None,
+        "slug": slug or None,
+        "sort_order": sort_order,
+        "is_active": is_active,
+    }
+    return await svc.create_org_doc(admin_id, data, file)
 
 
 @router.patch(
@@ -281,18 +348,33 @@ async def create_org_doc(
 )
 async def update_org_doc(
     doc_id: UUID,
-    body: OrgDocUpdateRequest,
+    title: str | None = Form(None, max_length=500),
+    content: str | None = Form(None),
+    slug: str | None = Form(None, max_length=255),
+    sort_order: int | None = Form(None),
+    is_active: bool | None = Form(None),
+    file: UploadFile | None = File(None),
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
-    file: UploadFile | None = File(None),
 ) -> OrgDocDetailResponse:
-    """Обновляет документ организации.
+    """Обновляет документ организации. Все поля optional.
 
     - **404** — документ не найден
     """
     admin_id = UUID(payload["sub"])
     svc = ContentAdminService(db)
-    return await svc.update_org_doc(doc_id, admin_id, body.model_dump(exclude_none=True), file)
+    data: dict[str, Any] = {}
+    if title is not None:
+        data["title"] = title
+    if content is not None:
+        data["content"] = content
+    if slug is not None:
+        data["slug"] = slug
+    if sort_order is not None:
+        data["sort_order"] = sort_order
+    if is_active is not None:
+        data["is_active"] = is_active
+    return await svc.update_org_doc(doc_id, admin_id, data, file)
 
 
 @router.patch(
@@ -332,3 +414,4 @@ async def delete_org_doc(
     svc = ContentAdminService(db)
     await svc.delete_org_doc(doc_id)
     return Response(status_code=204)
+
