@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     # Frontend
     FRONTEND_URL: str = "https://trichology.ru"
+    ADMIN_FRONTEND_URL: str = ""  # URL админки; если пусто — письма staff идут на FRONTEND_URL
 
 
 settings = Settings()

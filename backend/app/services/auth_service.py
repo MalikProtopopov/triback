@@ -169,9 +169,20 @@ class AuthService:
         if not user:
             return  # never reveal whether email exists
 
+        _STAFF_ROLES = {"admin", "manager", "accountant"}
+        staff_role_q = await self.db.execute(
+            select(Role.name)
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .where(
+                UserRoleAssignment.user_id == user.id,
+                Role.name.in_(list(_STAFF_ROLES)),
+            )
+        )
+        is_staff = staff_role_q.scalar_one_or_none() is not None
+
         token = generate_token()
         await self.redis.set(f"reset_pwd:{token}", str(user.id), ex=RESET_PWD_TTL)
-        await send_password_reset_email.kiq(email, token)
+        await send_password_reset_email.kiq(email, token, is_staff=is_staff)
 
     async def reset_password(self, token: str, new_password: str) -> None:
         user_id = await self.redis.get(f"reset_pwd:{token}")

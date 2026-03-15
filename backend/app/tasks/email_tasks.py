@@ -62,8 +62,16 @@ async def send_verification_email(email: str, token: str) -> None:
 
 
 @broker.task  # type: ignore[misc]
-async def send_password_reset_email(email: str, token: str) -> None:
-    url = f"{_BASE_URL}/auth/reset-password?token={token}"
+async def send_password_reset_email(email: str, token: str, is_staff: bool = False) -> None:
+    if is_staff and settings.ADMIN_FRONTEND_URL:
+        base = settings.ADMIN_FRONTEND_URL.rstrip("/")
+    elif is_staff:
+        logger.warning("ADMIN_FRONTEND_URL not set, sending staff password reset to FRONTEND_URL", email=email)
+        base = _BASE_URL
+    else:
+        base = _BASE_URL
+    path = "/admin/reset-password" if is_staff else "/auth/reset-password"
+    url = f"{base}{path}?token={token}"
     html = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1f2937;'>Сброс пароля</h2>"
         f"<p style='color:#4b5563;line-height:1.6;'>Вы запросили сброс пароля. "
