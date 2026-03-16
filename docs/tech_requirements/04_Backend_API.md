@@ -295,17 +295,12 @@ app/
 ```json
 {
   "access_token": "string",
-  "user": {
-    "id": "uuid",
-    "email": "string",
-    "roles": ["doctor"],
-    "email_verified": true,
-    "has_chosen_role": true,
-    "onboarding_completed": true,
-    "moderation_status": "approved"
-  }
+  "token_type": "bearer",
+  "role": "doctor"
 }
 ```
+
+`role` — одна из: `admin`, `manager`, `accountant`, `doctor`, `user`. Для полных данных текущего пользователя (id, email, role, is_staff, sidebar_sections) используйте `GET /auth/me` после логина.
 
 **Response headers:** `Set-Cookie: refresh_token=...; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`
 
@@ -339,7 +334,9 @@ app/
 **Response 200:**
 ```json
 {
-  "access_token": "string"
+  "access_token": "string",
+  "token_type": "bearer",
+  "role": "manager"
 }
 ```
 
@@ -361,6 +358,36 @@ app/
 3. Верифицировать подпись и срок
 4. Выдать новый access token
 5. Ротация: выдать новый refresh token, старый удалить из Redis (Refresh Token Rotation)
+
+---
+
+#### GET /api/v1/auth/me
+
+**Назначение:** Текущий пользователь, роль и разделы сайдбара для фронтенда  
+**Доступ:** Любой авторизованный (JWT)
+
+**Request:** Заголовок `Authorization: Bearer <access_token>`
+
+**Response 200:**
+```json
+{
+  "id": "uuid",
+  "email": "user@example.com",
+  "role": "manager",
+  "is_staff": true,
+  "sidebar_sections": ["dashboard", "doctors", "events", "payments", "content", "content_articles", "content_themes", "content_documents", "settings", "settings_cities", "notifications", "portal_users"]
+}
+```
+
+- `is_staff: true` для ролей admin, manager, accountant; `false` для doctor, user.
+- `sidebar_sections` — ключи разделов сайдбара/меню ЛК. Маппинг ролей: `docs/ADMIN_ROLES_AND_PERMISSIONS.md`, `docs/CLIENT_ROLES_AND_PERMISSIONS.md`.
+
+**Response 401:** не авторизован
+
+**Бизнес-логика:**
+1. Декодировать JWT, получить `sub` (user_id) и `role`
+2. Загрузить пользователя по id
+3. Вычислить `is_staff` и `sidebar_sections` по роли
 
 ---
 

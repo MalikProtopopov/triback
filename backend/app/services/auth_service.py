@@ -18,6 +18,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.core.permissions import get_sidebar_sections_for_role
 from app.models.users import Role, User, UserRoleAssignment
 from app.tasks.email_tasks import (
     send_email_change_confirmation,
@@ -114,7 +115,7 @@ class AuthService:
         user.last_login_at = datetime.now(tz=UTC)
         await self.db.commit()
 
-        return {"access_token": access_token, "refresh_token": refresh_token}
+        return {"access_token": access_token, "refresh_token": refresh_token, "role": role_name}
 
     async def refresh_tokens(self, refresh_jwt: str) -> dict[str, str]:
         payload = decode_token(refresh_jwt)
@@ -150,7 +151,7 @@ class AuthService:
             f"refresh:{user_id}:{new_jti}", "1", ex=REFRESH_TTL
         )
 
-        return {"access_token": new_access, "refresh_token": new_refresh}
+        return {"access_token": new_access, "refresh_token": new_refresh, "role": role_name}
 
     async def logout(self, refresh_jwt: str) -> None:
         payload = decode_token(refresh_jwt)
@@ -255,3 +256,24 @@ class AuthService:
 
         user.email = new_email
         await self.db.commit()
+
+    async def get_current_user_info(
+        self, user_id: str, role: str
+    ) -> "CurrentUserResponse":
+        """Return current user info with role and sidebar_sections for frontend."""
+        from app.schemas.auth import CurrentUserResponse
+
+        user = await self.db.get(User, user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        is_staff = role in ("admin", "manager", "accountant")
+        sidebar_sections = get_sidebar_sections_for_role(role)
+
+        return CurrentUserResponse(
+            id=str(user.id),
+            email=user.email,
+            role=role,
+            is_staff=is_staff,
+            sidebar_sections=sidebar_sections,
+        )

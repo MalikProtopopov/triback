@@ -23,13 +23,23 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    role: str  # admin | manager | accountant | doctor | user
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
             "token_type": "bearer",
+            "role": "doctor",
         }
     })
+
+
+class CurrentUserResponse(BaseModel):
+    id: str
+    email: str
+    role: str
+    is_staff: bool
+    sidebar_sections: list[str]
 
 
 class VerifyEmailRequest(BaseModel):

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db_session
-from app.core.dependencies import get_current_user_id
+from app.core.dependencies import get_current_user, get_current_user_id
 from app.core.openapi import error_responses
 from app.core.rate_limit import limiter
 from app.core.redis import get_redis
@@ -14,6 +14,7 @@ from app.schemas.auth import (
     ChangeEmailRequest,
     ChangePasswordRequest,
     ConfirmEmailChangeRequest,
+    CurrentUserResponse,
     ForgotPasswordRequest,
     LoginRequest,
     MessageResponse,
@@ -120,7 +121,10 @@ async def login(
     svc = AuthService(db, redis)
     tokens = await svc.login(email=data.email, password=data.password)
     _set_refresh_cookie(response, tokens["refresh_token"])
-    return TokenResponse(access_token=tokens["access_token"])
+    return TokenResponse(
+        access_token=tokens["access_token"],
+        role=tokens["role"],
+    )
 
 
 @router.post(
@@ -147,7 +151,31 @@ async def refresh(
     svc = AuthService(db, redis)
     tokens = await svc.refresh_tokens(refresh_token)
     _set_refresh_cookie(response, tokens["refresh_token"])
-    return TokenResponse(access_token=tokens["access_token"])
+    return TokenResponse(
+        access_token=tokens["access_token"],
+        role=tokens["role"],
+    )
+
+
+@router.get(
+    "/me",
+    response_model=CurrentUserResponse,
+    summary="Текущий пользователь",
+    responses=error_responses(401),
+)
+async def get_me(
+    payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> CurrentUserResponse:
+    """Возвращает id, email, role, is_staff и sidebar_sections для текущего пользователя.
+    Используется фронтендом для построения сайдбара по ролям.
+    """
+    svc = AuthService(db, redis)
+    return await svc.get_current_user_info(
+        user_id=payload["sub"],
+        role=payload.get("role", "user"),
+    )
 
 
 @router.post(
