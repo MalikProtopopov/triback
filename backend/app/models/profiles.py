@@ -97,6 +97,9 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     diploma_photo_url: Mapped[str | None] = mapped_column(String(500))
     slug: Mapped[str] = mapped_column(String(255), nullable=False)
     colleague_contacts: Mapped[str | None] = mapped_column(Text)
+    onboarding_submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="doctor_profile")  # type: ignore[name-defined]  # noqa: F821
     city: Mapped["City | None"] = relationship()  # type: ignore[name-defined]  # noqa: F821

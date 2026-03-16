@@ -21,6 +21,9 @@ docker compose -f "$COMPOSE_FILE" run --rm backend alembic upgrade head
 echo "=== Restarting backend + worker ==="
 docker compose -f "$COMPOSE_FILE" up -d --no-deps --build backend worker
 
+echo "=== Restarting nginx (refresh proxy to backend) ==="
+docker compose -f "$COMPOSE_FILE" restart nginx
+
 echo "=== Cleaning old images ==="
 docker image prune -f
 

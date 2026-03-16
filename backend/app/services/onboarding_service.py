@@ -1,13 +1,14 @@
 """Onboarding service — role selection, profile filling, document upload, submission."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
-from app.models.profiles import DoctorDocument, DoctorProfile
+from app.models.profiles import DoctorDocument, DoctorProfile, ModerationHistory
 from app.models.users import Role, User, UserRoleAssignment
 from app.services import file_service
 
@@ -45,6 +46,7 @@ class OnboardingService:
         moderation_status = None
         submitted_at = None
         rejection_comment = None
+        is_submitted = False
 
         if has_doctor_role:
             profile_result = await self.db.execute(
@@ -55,6 +57,8 @@ class OnboardingService:
                 profile_filled = bool(profile.first_name and profile.last_name and profile.phone)
                 has_medical_diploma = profile.has_medical_diploma
                 moderation_status = profile.status
+                submitted_at = profile.onboarding_submitted_at
+                is_submitted = submitted_at is not None
 
                 doc_result = await self.db.execute(
                     select(DoctorDocument).where(
@@ -64,6 +68,21 @@ class OnboardingService:
                 docs = doc_result.scalars().all()
                 documents_uploaded = len(docs) > 0
 
+                if moderation_status == "rejected":
+                    mh_result = await self.db.execute(
+                        select(ModerationHistory.comment)
+                        .where(
+                            and_(
+                                ModerationHistory.entity_type == "doctor_profile",
+                                ModerationHistory.entity_id == profile.id,
+                                ModerationHistory.action == "reject",
+                            )
+                        )
+                        .order_by(ModerationHistory.created_at.desc())
+                        .limit(1)
+                    )
+                    rejection_comment = mh_result.scalar_one_or_none()
+
         next_step = self._compute_next_step(
             email_verified=email_verified,
             role_chosen=role_chosen,
@@ -71,6 +90,7 @@ class OnboardingService:
             profile_filled=profile_filled,
             has_medical_diploma=has_medical_diploma,
             moderation_status=moderation_status,
+            is_submitted=is_submitted,
         )
 
         return {
@@ -95,6 +115,7 @@ class OnboardingService:
         profile_filled: bool,
         has_medical_diploma: bool,
         moderation_status: str | None,
+        is_submitted: bool,
     ) -> str:
         if not email_verified:
             return "verify_email"
@@ -106,13 +127,14 @@ class OnboardingService:
             return "fill_profile"
         if not has_medical_diploma:
             return "upload_documents"
+        if not is_submitted:
+            return "submit"
         if moderation_status == "pending_review":
             return "await_moderation"
         if moderation_status in ("approved", "active"):
             return "completed"
         if moderation_status == "rejected":
             return "fill_profile"
-        # status is still the default (pending_review before submit)
         return "submit"
 
     async def choose_role(self, user_id: UUID, role: str) -> dict:
@@ -235,13 +257,16 @@ class OnboardingService:
         return doc
 
     async def submit(self, user_id: UUID) -> dict:
-        """Submit the doctor profile for moderation."""
+        """Submit the doctor profile for moderation (initial or re-submit after rejection)."""
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == user_id)
         )
         profile = result.scalar_one_or_none()
         if not profile:
             raise NotFoundError("Doctor profile not found")
+
+        if profile.status not in ("pending_review", "rejected"):
+            raise ConflictError("Заявка уже одобрена или находится на проверке")
 
         if not profile.first_name or not profile.last_name or not profile.phone:
             raise AppValidationError(
@@ -255,6 +280,7 @@ class OnboardingService:
             )
 
         profile.status = "pending_review"
+        profile.onboarding_submitted_at = datetime.now(tz=UTC)
         await self.db.commit()
 
         return {
