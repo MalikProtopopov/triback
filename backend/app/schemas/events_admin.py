@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.content_admin import ContentBlockNested
+
 # ── Request schemas ───────────────────────────────────────────────
 
 class EventCreateRequest(BaseModel):
@@ -158,6 +160,7 @@ class EventDetailResponse(BaseModel):
     tariffs: list[TariffNested] = []
     galleries: list[GalleryNested] = []
     recordings: list[RecordingNested] = []
+    content_blocks: list[ContentBlockNested] = []
 
 
 class TariffResponse(BaseModel):

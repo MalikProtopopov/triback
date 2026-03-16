@@ -24,6 +24,7 @@ from app.models.events import (
 )
 from app.models.profiles import DoctorProfile
 from app.models.users import User
+from app.schemas.content_admin import ContentBlockNested
 from app.schemas.events_admin import (
     EventCreatedResponse,
     EventDetailResponse,
@@ -45,6 +46,7 @@ from app.schemas.events_admin import (
     TariffResponse,
 )
 from app.services import file_service
+from app.services.content_block_service import list_blocks_for_entity
 
 logger = structlog.get_logger(__name__)
 
@@ -224,12 +226,31 @@ class EventsAdminService:
             for r in ev.recordings
         ]
 
+        blocks = await list_blocks_for_entity(self.db, "event", ev.id)
+        content_blocks = [
+            ContentBlockNested(
+                id=b.id,
+                block_type=b.block_type,
+                sort_order=b.sort_order,
+                title=b.title,
+                content=b.content,
+                media_url=b.media_url,
+                thumbnail_url=b.thumbnail_url,
+                link_url=b.link_url,
+                link_label=b.link_label,
+                device_type=b.device_type,
+                block_metadata=b.block_metadata,
+            )
+            for b in blocks
+        ]
+
         return EventDetailResponse(
             id=ev.id, title=ev.title, slug=ev.slug, description=ev.description,
             event_date=ev.event_date, event_end_date=ev.event_end_date,
             location=ev.location, cover_image_url=ev.cover_image_url,
             status=ev.status, created_by=ev.created_by, created_at=ev.created_at,
             tariffs=tariffs, galleries=galleries, recordings=recordings,
+            content_blocks=content_blocks,
         )
 
     # ── Update ────────────────────────────────────────────────────

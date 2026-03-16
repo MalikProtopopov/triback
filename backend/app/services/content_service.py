@@ -31,6 +31,7 @@ from app.schemas.content_admin import (
     ThemeNested,
 )
 from app.services import file_service
+from app.services.content_block_service import list_blocks_for_entity
 
 logger = structlog.get_logger(__name__)
 
@@ -156,6 +157,24 @@ class ContentAdminService:
         if not a:
             raise NotFoundError("Article not found")
 
+        blocks = await list_blocks_for_entity(self.db, "article", a.id)
+        content_blocks = [
+            ContentBlockNested(
+                id=b.id,
+                block_type=b.block_type,
+                sort_order=b.sort_order,
+                title=b.title,
+                content=b.content,
+                media_url=b.media_url,
+                thumbnail_url=b.thumbnail_url,
+                link_url=b.link_url,
+                link_label=b.link_label,
+                device_type=b.device_type,
+                block_metadata=b.block_metadata,
+            )
+            for b in blocks
+        ]
+
         return ArticleAdminDetailResponse(
             id=a.id,
             slug=a.slug,
@@ -174,6 +193,7 @@ class ContentAdminService:
             ],
             created_at=a.created_at,
             updated_at=a.updated_at,
+            content_blocks=content_blocks,
         )
 
     async def update_article(

@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.exceptions import NotFoundError
 from app.models.cities import City
+from app.services.content_block_service import list_blocks_for_entity
 from app.models.content import Article, ArticleTheme, ArticleThemeAssignment
 from app.models.events import Event, EventGallery
 from app.models.profiles import DoctorProfile, Specialization
@@ -24,6 +25,7 @@ from app.schemas.public import (
     ArticleThemeResponse,
     CityResponse,
     CityWithDoctorsResponse,
+    ContentBlockPublicNested,
     DoctorPublicDetailResponse,
     DoctorPublicListItem,
     EventPublicDetailResponse,
@@ -244,6 +246,23 @@ class PublicService:
             twitter_card="summary_large_image",
         )
 
+        blocks = await list_blocks_for_entity(self.db, "doctor_profile", dp.id)
+        content_blocks = [
+            ContentBlockPublicNested(
+                id=str(b.id),
+                block_type=b.block_type,
+                sort_order=b.sort_order,
+                title=b.title,
+                content=b.content,
+                media_url=b.media_url,
+                thumbnail_url=b.thumbnail_url,
+                link_url=b.link_url,
+                link_label=b.link_label,
+                device_type=b.device_type,
+            )
+            for b in blocks
+        ]
+
         return DoctorPublicDetailResponse(
             id=dp.id,
             first_name=dp.first_name,
@@ -260,6 +279,7 @@ class PublicService:
             public_email=dp.public_email,
             slug=dp.slug,
             seo=seo,
+            content_blocks=content_blocks,
         )
 
     # ── Events ────────────────────────────────────────────────────
@@ -394,6 +414,23 @@ class PublicService:
             twitter_card="summary_large_image",
         )
 
+        blocks = await list_blocks_for_entity(self.db, "event", ev.id)
+        content_blocks = [
+            ContentBlockPublicNested(
+                id=str(b.id),
+                block_type=b.block_type,
+                sort_order=b.sort_order,
+                title=b.title,
+                content=b.content,
+                media_url=b.media_url,
+                thumbnail_url=b.thumbnail_url,
+                link_url=b.link_url,
+                link_label=b.link_label,
+                device_type=b.device_type,
+            )
+            for b in blocks
+        ]
+
         return EventPublicDetailResponse(
             id=ev.id,
             title=ev.title,
@@ -407,6 +444,7 @@ class PublicService:
             galleries=galleries,
             recordings=recordings,
             seo=seo,
+            content_blocks=content_blocks,
         )
 
     # ── Articles ──────────────────────────────────────────────────
@@ -514,6 +552,23 @@ class PublicService:
             twitter_card="summary_large_image",
         )
 
+        blocks = await list_blocks_for_entity(self.db, "article", article.id)
+        content_blocks = [
+            ContentBlockPublicNested(
+                id=str(b.id),
+                block_type=b.block_type,
+                sort_order=b.sort_order,
+                title=b.title,
+                content=b.content,
+                media_url=b.media_url,
+                thumbnail_url=b.thumbnail_url,
+                link_url=b.link_url,
+                link_label=b.link_label,
+                device_type=b.device_type,
+            )
+            for b in blocks
+        ]
+
         return ArticleDetailResponse(
             id=article.id,
             slug=article.slug,
@@ -527,4 +582,5 @@ class PublicService:
                 for ta in article.theme_assignments
             ],
             seo=seo,
+            content_blocks=content_blocks,
         )

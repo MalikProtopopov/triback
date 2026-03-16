@@ -62,6 +62,7 @@ class ArticleAdminDetailResponse(BaseModel):
     seo_title: str | None = None
     seo_description: str | None = None
     themes: list[ThemeNested] = []
+    content_blocks: list["ContentBlockNested"] = []
     created_at: datetime
     updated_at: datetime | None = None
 

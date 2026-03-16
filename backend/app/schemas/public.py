@@ -18,6 +18,21 @@ class SeoNested(BaseModel):
     canonical_url: str | None = None
 
 
+# ── Content blocks (shared) ───────────────────────────────────────
+
+class ContentBlockPublicNested(BaseModel):
+    id: str
+    block_type: str
+    sort_order: int
+    title: str | None = None
+    content: str | None = None
+    media_url: str | None = None
+    thumbnail_url: str | None = None
+    link_url: str | None = None
+    link_label: str | None = None
+    device_type: str
+
+
 # ── Cities ────────────────────────────────────────────────────────
 
 class CityResponse(BaseModel):
@@ -67,6 +82,7 @@ class DoctorPublicDetailResponse(BaseModel):
     public_email: str | None = None
     slug: str | None = None
     seo: SeoNested | None = None
+    content_blocks: list[ContentBlockPublicNested] = []
 
 
 # ── Events ────────────────────────────────────────────────────────
@@ -130,6 +146,7 @@ class EventPublicDetailResponse(BaseModel):
     galleries: list[GalleryPublicNested] = []
     recordings: list[RecordingPublicNested] = []
     seo: SeoNested | None = None
+    content_blocks: list[ContentBlockPublicNested] = []
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -198,6 +215,7 @@ class ArticleDetailResponse(BaseModel):
     published_at: datetime | None = None
     themes: list[ThemeNested] = []
     seo: SeoNested | None = None
+    content_blocks: list[ContentBlockPublicNested] = []
 
 
 class ArticleThemeResponse(BaseModel):
@@ -254,19 +272,6 @@ class OrgDocPublicItem(BaseModel):
     slug: str
     content: str | None = None
     file_url: str | None = None
-
-
-class ContentBlockPublicNested(BaseModel):
-    id: str
-    block_type: str
-    sort_order: int
-    title: str | None = None
-    content: str | None = None
-    media_url: str | None = None
-    thumbnail_url: str | None = None
-    link_url: str | None = None
-    link_label: str | None = None
-    device_type: str
 
 
 class OrgDocPublicDetailResponse(BaseModel):

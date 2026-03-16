@@ -16,6 +16,21 @@ from app.schemas.content_blocks import ContentBlockListResponse, ContentBlockRes
 logger = structlog.get_logger(__name__)
 
 
+async def list_blocks_for_entity(
+    db: AsyncSession, entity_type: str, entity_id: UUID
+) -> list[ContentBlock]:
+    """Return content blocks for an entity, sorted by sort_order (ASC)."""
+    result = await db.execute(
+        select(ContentBlock)
+        .where(
+            ContentBlock.entity_type == entity_type,
+            ContentBlock.entity_id == entity_id,
+        )
+        .order_by(ContentBlock.sort_order.asc())
+    )
+    return list(result.scalars().all())
+
+
 def _block_to_response(block: ContentBlock) -> ContentBlockResponse:
     return ContentBlockResponse(
         id=block.id,

@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
+from app.schemas.content_admin import ContentBlockNested
+
 # ── Nested helpers ────────────────────────────────────────────────
 
 class CityNested(BaseModel):
@@ -157,6 +159,7 @@ class DoctorDetailResponse(BaseModel):
     payments: list[PaymentNested] = []
     pending_draft: PendingDraftNested | None = None
     moderation_history: list[ModerationHistoryNested] = []
+    content_blocks: list[ContentBlockNested] = []
     created_at: datetime
 
 

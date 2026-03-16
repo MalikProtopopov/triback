@@ -26,6 +26,7 @@ from app.models.profiles import (
 )
 from app.models.subscriptions import Payment, Subscription
 from app.models.users import Role, User, UserRoleAssignment
+from app.schemas.content_admin import ContentBlockNested
 from app.schemas.doctor_admin import (
     AdminCreateDoctorResponse,
     CityNested,
@@ -41,6 +42,7 @@ from app.schemas.doctor_admin import (
     PortalUserListItem,
     SubscriptionNested,
 )
+from app.services.content_block_service import list_blocks_for_entity
 from app.tasks.email_tasks import (
     send_custom_email,
     send_doctor_invite_email,
@@ -482,6 +484,22 @@ class DoctorAdminService:
             ],
             pending_draft=pending_draft,
             moderation_history=mod_items,
+            content_blocks=[
+                ContentBlockNested(
+                    id=b.id,
+                    block_type=b.block_type,
+                    sort_order=b.sort_order,
+                    title=b.title,
+                    content=b.content,
+                    media_url=b.media_url,
+                    thumbnail_url=b.thumbnail_url,
+                    link_url=b.link_url,
+                    link_label=b.link_label,
+                    device_type=b.device_type,
+                    block_metadata=b.block_metadata,
+                )
+                for b in (await list_blocks_for_entity(self.db, "doctor_profile", profile_id))
+            ],
             created_at=dp.created_at,
         )
 
