@@ -79,5 +79,8 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "https://trichology.ru"
     ADMIN_FRONTEND_URL: str = ""  # URL админки; если пусто — письма staff идут на FRONTEND_URL
 
+    # Auth cookies (domain for cross-subdomain sharing, e.g. .trichologia.mediann.dev)
+    COOKIE_DOMAIN: str | None = None
+
 
 settings = Settings()

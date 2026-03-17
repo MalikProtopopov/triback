@@ -330,13 +330,23 @@ async def create_receipt(
 
 
 async def create_profile_change(
-    db, *, profile: DoctorProfile, changes: dict | None = None
+    db,
+    *,
+    profile: DoctorProfile,
+    changes: dict | None = None,
+    status: str = "pending",
+    rejection_reason: str | None = None,
+    reviewed_at: datetime | None = None,
 ) -> DoctorProfileChange:
+    from datetime import UTC
+
     change = DoctorProfileChange(
         doctor_profile_id=profile.id,
         changes=changes or {"bio": "Updated bio"},
         changed_fields=list((changes or {"bio": "Updated bio"}).keys()),
-        status="pending",
+        status=status,
+        rejection_reason=rejection_reason,
+        reviewed_at=reviewed_at or (datetime.now(UTC) if status != "pending" else None),
     )
     db.add(change)
     await db.flush()

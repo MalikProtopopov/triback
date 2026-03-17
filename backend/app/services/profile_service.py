@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import and_, select
+from sqlalchemy import and_, desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -86,18 +86,32 @@ class ProfileService:
                 DoctorProfileChange.status == "pending",
             )
         )
-        pending_draft = draft_result.scalar_one_or_none()
+        draft = draft_result.scalar_one_or_none()
+
+        if not draft:
+            rejected_result = await self.db.execute(
+                select(DoctorProfileChange)
+                .where(
+                    DoctorProfileChange.doctor_profile_id == profile.id,
+                    DoctorProfileChange.status == "rejected",
+                )
+                .order_by(desc(DoctorProfileChange.reviewed_at))
+                .limit(1)
+            )
+            draft = rejected_result.scalar_one_or_none()
 
         city_data = None
         if profile.city:
             city_data = {"id": profile.city.id, "name": profile.city.name}
 
         draft_data = None
-        if pending_draft:
+        if draft:
             draft_data = {
-                "status": pending_draft.status,
-                "changes": pending_draft.changes,
-                "submitted_at": pending_draft.submitted_at,
+                "status": draft.status,
+                "changes": draft.changes,
+                "submitted_at": draft.submitted_at,
+                "rejection_reason": draft.rejection_reason,
+                "reviewed_at": draft.reviewed_at,
             }
 
         return {

@@ -29,30 +29,39 @@ from app.services.auth_service import AuthService
 router = APIRouter(prefix="/auth")
 
 REFRESH_COOKIE_KEY = "refresh_token"
+REFRESH_COOKIE_KEY_ADMIN = "refresh_token_admin"
 REFRESH_COOKIE_MAX_AGE = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
-def _set_refresh_cookie(response: Response, token: str) -> None:
-    response.set_cookie(
-        key=REFRESH_COOKIE_KEY,
-        value=token,
+def _is_admin_origin(request: Request) -> bool:
+    """True if Origin or Referer contains 'admin.' (admin subdomain)."""
+    origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
+    return "admin." in origin
+
+
+def _get_refresh_cookie_key(request: Request) -> str:
+    return REFRESH_COOKIE_KEY_ADMIN if _is_admin_origin(request) else REFRESH_COOKIE_KEY
+
+
+def _set_refresh_cookie(response: Response, token: str, key: str = REFRESH_COOKIE_KEY) -> None:
+    kwargs: dict = dict(
         httponly=True,
         secure=True,
         samesite="lax",
         max_age=REFRESH_COOKIE_MAX_AGE,
         path=REFRESH_COOKIE_PATH,
     )
+    if settings.COOKIE_DOMAIN:
+        kwargs["domain"] = settings.COOKIE_DOMAIN
+    response.set_cookie(key=key, value=token, **kwargs)
 
 
-def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(
-        key=REFRESH_COOKIE_KEY,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path=REFRESH_COOKIE_PATH,
-    )
+def _clear_refresh_cookie(response: Response, key: str = REFRESH_COOKIE_KEY) -> None:
+    kwargs: dict = dict(httponly=True, secure=True, samesite="lax", path=REFRESH_COOKIE_PATH)
+    if settings.COOKIE_DOMAIN:
+        kwargs["domain"] = settings.COOKIE_DOMAIN
+    response.delete_cookie(key=key, **kwargs)
 
 
 @router.post(
@@ -146,7 +155,8 @@ async def login(
     """
     svc = AuthService(db, redis)
     tokens = await svc.login(email=data.email, password=data.password)
-    _set_refresh_cookie(response, tokens["refresh_token"])
+    cookie_key = _get_refresh_cookie_key(request)
+    _set_refresh_cookie(response, tokens["refresh_token"], key=cookie_key)
     return TokenResponse(
         access_token=tokens["access_token"],
         role=tokens["role"],
@@ -160,23 +170,27 @@ async def login(
     responses=error_responses(401),
 )
 async def refresh(
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-    refresh_token: str | None = Cookie(None),
+    refresh_token: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY),
+    refresh_token_admin: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY_ADMIN),
 ) -> TokenResponse:
     """Обновляет пару access/refresh токенов.
-    Refresh token берётся из httpOnly cookie `refresh_token`.
+    Refresh token берётся из httpOnly cookie по Origin: admin. → refresh_token_admin, иначе refresh_token.
 
     - **401** — refresh token отсутствует, невалиден или отозван
     """
-    if not refresh_token:
+    cookie_key = _get_refresh_cookie_key(request)
+    token = refresh_token_admin if cookie_key == REFRESH_COOKIE_KEY_ADMIN else refresh_token
+    if not token:
         from app.core.exceptions import UnauthorizedError
 
         raise UnauthorizedError("Refresh token missing")
     svc = AuthService(db, redis)
-    tokens = await svc.refresh_tokens(refresh_token)
-    _set_refresh_cookie(response, tokens["refresh_token"])
+    tokens = await svc.refresh_tokens(token)
+    _set_refresh_cookie(response, tokens["refresh_token"], key=cookie_key)
     return TokenResponse(
         access_token=tokens["access_token"],
         role=tokens["role"],
@@ -213,13 +227,16 @@ async def logout(
     response: Response,
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-    refresh_token: str | None = Cookie(None),
+    refresh_token: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY),
+    refresh_token_admin: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY_ADMIN),
 ) -> MessageResponse:
-    """Отзывает refresh token и очищает cookie."""
-    if refresh_token:
-        svc = AuthService(db, redis)
-        await svc.logout(refresh_token)
-    _clear_refresh_cookie(response)
+    """Отзывает refresh token и очищает оба cookie (client + admin)."""
+    svc = AuthService(db, redis)
+    for token in (refresh_token, refresh_token_admin):
+        if token:
+            await svc.logout(token)
+    _clear_refresh_cookie(response, key=REFRESH_COOKIE_KEY)
+    _clear_refresh_cookie(response, key=REFRESH_COOKIE_KEY_ADMIN)
     return MessageResponse(message="Вы вышли из системы")
 
 

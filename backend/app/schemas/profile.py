@@ -48,6 +48,8 @@ class PendingDraftNested(BaseModel):
     status: str
     changes: dict
     submitted_at: datetime
+    rejection_reason: str | None = None
+    reviewed_at: datetime | None = None
 
 
 class PublicProfileResponse(BaseModel):
