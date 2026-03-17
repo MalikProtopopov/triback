@@ -103,6 +103,41 @@ async def test_get_public_returns_rejected_draft_with_reason(
     assert data["pending_draft"]["changes"]["bio"] == "Rejected bio"
 
 
+async def test_get_public_no_draft_when_latest_is_approved(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    """Если последний черновик approved — не показывать старый rejected."""
+    from datetime import UTC, datetime
+
+    from tests.factories import create_doctor_profile, create_profile_change
+
+    profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await create_profile_change(
+        db_session,
+        profile=profile,
+        changes={"bio": "Old rejected"},
+        status="rejected",
+        rejection_reason="Плохое качество",
+        reviewed_at=datetime(2026, 3, 15, tzinfo=UTC),
+    )
+    await create_profile_change(
+        db_session,
+        profile=profile,
+        changes={"bio": "Approved bio"},
+        status="approved",
+        reviewed_at=datetime(2026, 3, 17, tzinfo=UTC),
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/profile/public", headers=auth_headers_doctor)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pending_draft"] is None
+
+
 async def test_get_public_pending_draft_has_no_rejection(
     client: AsyncClient,
     auth_headers_doctor: dict[str, str],
@@ -136,6 +171,41 @@ async def test_get_public_pending_draft_has_no_rejection(
     assert data["pending_draft"]["status"] == "pending"
     assert data["pending_draft"]["rejection_reason"] is None
     assert data["pending_draft"]["reviewed_at"] is None
+
+
+async def test_get_public_no_draft_after_approved(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    """После approved черновика не показывать старый rejected (pending_draft = null)."""
+    from datetime import UTC, datetime, timedelta
+
+    from tests.factories import create_doctor_profile, create_profile_change
+
+    profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await create_profile_change(
+        db_session,
+        profile=profile,
+        changes={"bio": "Old rejected"},
+        status="rejected",
+        rejection_reason="Bad",
+        reviewed_at=datetime.now(UTC) - timedelta(days=2),
+    )
+    await create_profile_change(
+        db_session,
+        profile=profile,
+        changes={"bio": "Approved bio"},
+        status="approved",
+        reviewed_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/profile/public", headers=auth_headers_doctor)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pending_draft"] is None
 
 
 async def test_profile_unauthenticated(client: AsyncClient):

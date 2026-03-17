@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -89,16 +89,20 @@ class ProfileService:
         draft = draft_result.scalar_one_or_none()
 
         if not draft:
-            rejected_result = await self.db.execute(
+            # Show rejected only if it's the most recent draft (no approved after it).
+            # Otherwise we'd show stale rejection after a later approval.
+            latest_result = await self.db.execute(
                 select(DoctorProfileChange)
-                .where(
-                    DoctorProfileChange.doctor_profile_id == profile.id,
-                    DoctorProfileChange.status == "rejected",
-                )
-                .order_by(desc(DoctorProfileChange.reviewed_at))
+                .where(DoctorProfileChange.doctor_profile_id == profile.id)
+                .order_by(desc(func.coalesce(
+                    DoctorProfileChange.reviewed_at,
+                    DoctorProfileChange.submitted_at,
+                )))
                 .limit(1)
             )
-            draft = rejected_result.scalar_one_or_none()
+            latest = latest_result.scalar_one_or_none()
+            if latest and latest.status == "rejected":
+                draft = latest
 
         city_data = None
         if profile.city:
