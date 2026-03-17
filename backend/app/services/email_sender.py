@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ssl
+from email.header import Header
 from email.message import EmailMessage
 
 import aiosmtplib
@@ -32,13 +33,13 @@ async def send_smtp_email(
     msg = EmailMessage()
     msg["From"] = settings.SMTP_FROM
     msg["To"] = to
-    msg["Subject"] = subject
+    msg["Subject"] = str(Header(subject, "utf-8"))
 
     if text_body:
-        msg.set_content(text_body)
-        msg.add_alternative(html_body, subtype="html")
+        msg.set_content(text_body, charset="utf-8")
+        msg.add_alternative(html_body, subtype="html", charset="utf-8")
     else:
-        msg.set_content(html_body, subtype="html")
+        msg.set_content(html_body, subtype="html", charset="utf-8")
 
     use_tls = settings.SMTP_TLS and settings.SMTP_PORT == 465
     start_tls = not use_tls and settings.SMTP_PORT == 587

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import structlog
 
 from app.core.config import settings
@@ -149,10 +150,10 @@ async def send_reminder_notification(email: str, message: str | None = None) -> 
 
 @broker.task  # type: ignore[misc]
 async def send_custom_email(email: str, subject: str, body: str) -> None:
-    html = _wrap_html(
-        f"<div style='color:#4b5563;line-height:1.6;'>{body}</div>"
+    wrapped = _wrap_html(
+        f"<div style='color:#4b5563;line-height:1.6;'>{html.escape(body)}</div>"
     )
-    await send_smtp_email(email, subject, html)
+    await send_smtp_email(email, subject, wrapped)
 
 
 @broker.task  # type: ignore[misc]
