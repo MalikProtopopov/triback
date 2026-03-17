@@ -612,8 +612,8 @@ class DoctorAdminService:
         self.db.add(
             ModerationHistory(
                 admin_id=admin_id,
-                entity_type="doctor_profile_change",
-                entity_id=draft.id,
+                entity_type="doctor_profile",
+                entity_id=profile_id,
                 action=f"draft_{action}",
                 comment=rejection_reason if action == "reject" else None,
             )
