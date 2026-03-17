@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
+from app.core.exceptions import AppError, ConflictError, NotFoundError, UnauthorizedError
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -81,6 +81,30 @@ class AuthService:
 
         user.email_verified_at = datetime.now(tz=UTC)
         await self.db.commit()
+
+    async def resend_verification_email(self, email: str) -> None:
+        """Resend verification email. Always returns without raising for security."""
+        result = await self.db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+        if not user:
+            return
+        if user.email_verified_at:
+            return
+
+        key = f"resend_verify:{email.lower()}"
+        count = await self.redis.incr(key)
+        if count == 1:
+            await self.redis.expire(key, 600)
+        if count > 3:
+            raise AppError(
+                429,
+                "RATE_LIMITED",
+                "Слишком много запросов. Попробуйте через 10 минут",
+            )
+
+        token = generate_token()
+        await self.redis.set(f"email_verify:{token}", str(user.id), ex=VERIFY_EMAIL_TTL)
+        await send_verification_email.kiq(email, token)
 
     # ------------------------------------------------------------------
     # Login / refresh / logout

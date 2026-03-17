@@ -19,6 +19,7 @@ from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     TokenResponse,
     VerifyEmailRequest,
@@ -96,6 +97,31 @@ async def verify_email(
     svc = AuthService(db, redis)
     await svc.verify_email(data.token)
     return MessageResponse(message="Email подтверждён")
+
+
+@router.post(
+    "/resend-verification-email",
+    response_model=MessageResponse,
+    summary="Повторная отправка письма подтверждения",
+    responses=error_responses(422, 429),
+)
+@limiter.limit("5/minute")
+async def resend_verification_email(
+    request: Request,
+    data: ResendVerificationRequest,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> MessageResponse:
+    """Повторно отправляет письмо подтверждения email. Всегда 200 — не раскрывает
+    статус верификации.
+
+    - **429** — превышен лимит (3 запроса на email за 10 минут)
+    """
+    svc = AuthService(db, redis)
+    await svc.resend_verification_email(data.email)
+    return MessageResponse(
+        message="Письмо с подтверждением отправлено на указанный email"
+    )
 
 
 @router.post(
