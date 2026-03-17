@@ -535,9 +535,26 @@ class DoctorAdminService:
 
         await self.db.flush()
 
+        has_active_subscription = False
+        if new_status == "approved":
+            sub_q = await self.db.execute(
+                select(Subscription.id).where(
+                    Subscription.user_id == dp.user_id,
+                    Subscription.status == "active",
+                    or_(
+                        Subscription.ends_at.is_(None),
+                        Subscription.ends_at > datetime.now(UTC),
+                    ),
+                ).limit(1)
+            )
+            has_active_subscription = sub_q.scalar_one_or_none() is not None
+
         user = await self.db.get(User, dp.user_id)
         if user:
-            await send_moderation_result_notification.kiq(user.email, new_status, comment)
+            await send_moderation_result_notification.kiq(
+                user.email, new_status, comment,
+                has_active_subscription=has_active_subscription if new_status == "approved" else None,
+            )
 
         await self.db.commit()
         return new_status

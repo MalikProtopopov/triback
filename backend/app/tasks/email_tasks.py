@@ -98,22 +98,42 @@ async def send_email_change_confirmation(email: str, token: str) -> None:
 
 @broker.task  # type: ignore[misc]
 async def send_moderation_result_notification(
-    email: str, status: str, comment: str | None = None
+    email: str,
+    status: str,
+    comment: str | None = None,
+    has_active_subscription: bool | None = None,
 ) -> None:
     if status == "approved":
         title = "Профиль одобрен"
-        msg = "Ваш профиль успешно прошёл модерацию и теперь виден в каталоге."
+        if has_active_subscription:
+            msg = (
+                "Ваш профиль успешно прошёл модерацию. "
+                "Профиль опубликован на сайте с обновлённой информацией."
+            )
+            button_url = _BASE_URL + "/profile"
+            button_label = "Перейти в профиль"
+        else:
+            msg = (
+                "Ваш профиль успешно прошёл модерацию. "
+                "Чтобы он был доступен на сайте, оплатите членский взнос в личном кабинете."
+            )
+            button_url = _BASE_URL + "/subscription"
+            button_label = "Перейти в личный кабинет"
+        html = _wrap_html(
+            f"<h2 style='margin:0 0 16px;color:#1f2937;'>{title}</h2>"
+            f"<p style='color:#4b5563;line-height:1.6;'>{msg}</p>"
+            f"{_button(button_url, button_label)}"
+        )
     else:
         title = "Профиль отклонён"
         msg = "К сожалению, ваш профиль не прошёл модерацию."
         if comment:
             msg += f"<br><br><strong>Причина:</strong> {comment}"
-
-    html = _wrap_html(
-        f"<h2 style='margin:0 0 16px;color:#1f2937;'>{title}</h2>"
-        f"<p style='color:#4b5563;line-height:1.6;'>{msg}</p>"
-        f"{_button(_BASE_URL + '/profile', 'Перейти в профиль')}"
-    )
+        html = _wrap_html(
+            f"<h2 style='margin:0 0 16px;color:#1f2937;'>{title}</h2>"
+            f"<p style='color:#4b5563;line-height:1.6;'>{msg}</p>"
+            f"{_button(_BASE_URL + '/profile', 'Перейти в профиль')}"
+        )
     await send_smtp_email(email, f"{title} — {_BRAND}", html)
 
 
