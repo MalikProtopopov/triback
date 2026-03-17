@@ -127,6 +127,7 @@ class DoctorListItemResponse(BaseModel):
     has_medical_diploma: bool
     subscription: SubscriptionNested | None = None
     has_pending_changes: bool = False
+    has_photo_in_draft: bool = False
     created_at: datetime
 
 

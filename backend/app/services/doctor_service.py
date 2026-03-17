@@ -277,16 +277,25 @@ class DoctorAdminService:
                     )
 
         pending_set: set[UUID] = set()
+        photo_draft_set: set[UUID] = set()
         if profile_ids:
-            pending_q = (
-                select(DoctorProfileChange.doctor_profile_id)
-                .where(
-                    DoctorProfileChange.doctor_profile_id.in_(profile_ids),
-                    DoctorProfileChange.status == "pending",
+            pending_rows = (
+                await self.db.execute(
+                    select(
+                        DoctorProfileChange.doctor_profile_id,
+                        DoctorProfileChange.changed_fields,
+                    ).where(
+                        DoctorProfileChange.doctor_profile_id.in_(profile_ids),
+                        DoctorProfileChange.status == "pending",
+                    )
                 )
-                .distinct()
-            )
-            pending_set = set((await self.db.execute(pending_q)).scalars().all())
+            ).all()
+            for row in pending_rows:
+                profile_id = row[0]
+                changed_fields = row[1] or []
+                pending_set.add(profile_id)
+                if "photo_url" in changed_fields:
+                    photo_draft_set.add(profile_id)
 
         items: list[DoctorListItemResponse] = []
         for dp in rows:
@@ -305,6 +314,7 @@ class DoctorAdminService:
                     has_medical_diploma=dp.has_medical_diploma,
                     subscription=sub_map.get(dp.user_id),
                     has_pending_changes=dp.id in pending_set,
+                    has_photo_in_draft=dp.id in photo_draft_set,
                     created_at=dp.created_at,
                 )
             )

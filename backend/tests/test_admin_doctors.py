@@ -180,6 +180,71 @@ async def test_admin_list_success(
     assert "data" in data
 
 
+async def test_admin_list_has_photo_in_draft_false_without_draft(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    """Врач без черновика — has_photo_in_draft: false."""
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, status="active")
+    await db_session.commit()
+
+    resp = await client.get(ADMIN_DOCTORS_URL, headers=auth_headers_admin)
+    assert resp.status_code == 200
+    items = resp.json()["data"]
+    assert len(items) >= 1
+    doctor = items[0]
+    assert doctor["has_photo_in_draft"] is False
+
+
+async def test_admin_list_has_photo_in_draft_false_draft_without_photo(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    """Врач с pending-черновиком без photo_url — has_photo_in_draft: false."""
+    from tests.factories import create_doctor_profile, create_profile_change
+
+    profile = await create_doctor_profile(db_session, status="active")
+    await create_profile_change(
+        db_session, profile=profile, changes={"bio": "New bio text"}
+    )
+    await db_session.commit()
+
+    resp = await client.get(ADMIN_DOCTORS_URL, headers=auth_headers_admin)
+    assert resp.status_code == 200
+    items = resp.json()["data"]
+    doctor = next(d for d in items if d["id"] == str(profile.id))
+    assert doctor["has_pending_changes"] is True
+    assert doctor["has_photo_in_draft"] is False
+
+
+async def test_admin_list_has_photo_in_draft_true(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    """Врач с pending-черновиком с photo_url — has_photo_in_draft: true."""
+    from tests.factories import create_doctor_profile, create_profile_change
+
+    profile = await create_doctor_profile(db_session, status="active")
+    await create_profile_change(
+        db_session,
+        profile=profile,
+        changes={"photo_url": "doctors/uuid/photo/new.jpg"},
+    )
+    await db_session.commit()
+
+    resp = await client.get(ADMIN_DOCTORS_URL, headers=auth_headers_admin)
+    assert resp.status_code == 200
+    items = resp.json()["data"]
+    doctor = next(d for d in items if d["id"] == str(profile.id))
+    assert doctor["has_pending_changes"] is True
+    assert doctor["has_photo_in_draft"] is True
+
+
 async def test_moderate_approve(
     client: AsyncClient,
     auth_headers_admin: dict[str, str],
