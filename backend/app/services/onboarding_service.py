@@ -8,6 +8,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
+from app.core.utils import generate_unique_slug
 from app.models.profiles import DoctorDocument, DoctorProfile, ModerationHistory
 from app.models.users import Role, User, UserRoleAssignment
 from app.services import file_service
@@ -159,12 +160,14 @@ class OnboardingService:
 
         profile_id = None
         if role == "doctor":
+            slug = await generate_unique_slug(self.db, DoctorProfile, "doctor")
             profile = DoctorProfile(
                 user_id=user_id,
                 first_name="",
                 last_name="",
                 phone="",
                 status="pending_review",
+                slug=slug,
             )
             self.db.add(profile)
             await self.db.flush()

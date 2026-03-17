@@ -93,6 +93,7 @@ async def create_doctor_profile(
         status=status,
         has_medical_diploma=has_medical_diploma,
         city_id=city.id if city else None,
+        slug=f"doctor-{n}",
     )
     db.add(profile)
     await db.flush()
