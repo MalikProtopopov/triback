@@ -137,6 +137,16 @@ class ProfileService:
         moderation_comment = data.pop("moderation_comment", None)
         changes = {k: v for k, v in data.items() if v is not None}
 
+        # Ensure JSON-serializable for JSONB (UUID, datetime → str)
+        def _to_json_value(v: object) -> object:
+            if isinstance(v, UUID):
+                return str(v)
+            if hasattr(v, "isoformat"):  # datetime, date
+                return v.isoformat()
+            return v
+
+        changes = {k: _to_json_value(v) for k, v in changes.items()}
+
         if not changes:
             raise NotFoundError("No fields to update")
 

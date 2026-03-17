@@ -157,7 +157,7 @@ async def update_public(
     - **404** — профиль не найден
     """
     svc = ProfileService(db)
-    update_data = data.model_dump(exclude_unset=True)
+    update_data = data.model_dump(exclude_unset=True, mode="json")
     await svc.update_public(user_id, update_data)
     return MessageResponse(message="Изменения отправлены на модерацию")
 
