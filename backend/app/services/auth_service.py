@@ -31,6 +31,21 @@ RESET_PWD_TTL = 3600  # 1 hour
 REFRESH_TTL = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
 EMAIL_CHANGE_TTL = 24 * 3600  # 24 hours
 
+_ROLE_PRIORITY = ("admin", "manager", "accountant", "doctor", "user")
+
+
+def _pick_role(role_names: list[str]) -> str:
+    """Return the highest-priority role from a list.
+
+    Priority: admin > manager > accountant > doctor > user.
+    Ensures staff users always get their staff role in the JWT even if they
+    also have a 'doctor' or 'user' role assigned by mistake.
+    """
+    for role in _ROLE_PRIORITY:
+        if role in role_names:
+            return role
+    return "user"
+
 
 class AuthService:
     def __init__(self, db: AsyncSession, redis: Redis) -> None:  # type: ignore[type-arg]
@@ -125,8 +140,8 @@ class AuthService:
             .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
             .where(UserRoleAssignment.user_id == user.id)
         )
-        role = role_result.scalar_one_or_none()
-        role_name = role.name if role else "user"
+        role_names = [r.name for r in role_result.scalars().all()]
+        role_name = _pick_role(role_names)
 
         jti = generate_token(16)
         access_token = create_access_token(user.id, role_name)
@@ -164,8 +179,8 @@ class AuthService:
             .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
             .where(UserRoleAssignment.user_id == user.id)
         )
-        role = role_result.scalar_one_or_none()
-        role_name = role.name if role else "user"
+        role_names = [r.name for r in role_result.scalars().all()]
+        role_name = _pick_role(role_names)
 
         new_jti = generate_token(16)
         new_access = create_access_token(UUID(user_id), role_name)

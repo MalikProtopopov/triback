@@ -147,6 +147,12 @@ class OnboardingService:
         )
         current_role_names = list(role_names_result.scalars().all())
 
+        _STAFF_ROLES = {"admin", "manager", "accountant"}
+        if any(r in current_role_names for r in _STAFF_ROLES):
+            raise ConflictError(
+                "Пользователи с ролью сотрудника не могут проходить онбординг как врач"
+            )
+
         if "doctor" in current_role_names or "user" in current_role_names:
             raise ConflictError("Роль уже выбрана")
 
