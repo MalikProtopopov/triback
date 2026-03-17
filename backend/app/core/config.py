@@ -1,7 +1,28 @@
 """Application configuration via Pydantic Settings."""
 
-from pydantic import PostgresDsn, RedisDsn
+import json
+from typing import Annotated, Any
+
+from pydantic import BeforeValidator, PostgresDsn, RedisDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _parse_allowed_hosts(value: Any) -> list[str]:
+    """Parse ALLOWED_HOSTS from env: JSON array or comma-separated string."""
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if v]
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return ["*"]
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                return [str(v).strip() for v in parsed if v]
+            except json.JSONDecodeError:
+                pass
+        return [v.strip() for v in s.split(",") if v.strip()]
+    return ["*"]
 
 
 class Settings(BaseSettings):
@@ -10,7 +31,7 @@ class Settings(BaseSettings):
     # Application
     DEBUG: bool = False
     SECRET_KEY: str = "change-me-in-production"
-    ALLOWED_HOSTS: list[str] = ["*"]
+    ALLOWED_HOSTS: Annotated[list[str], BeforeValidator(_parse_allowed_hosts)] = ["*"]
 
     # JWT (RS256)
     JWT_PRIVATE_KEY_PATH: str = "keys/private.pem"
@@ -31,6 +52,7 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
     S3_BUCKET: str = "triho-dev"
+    S3_PUBLIC_URL: str = ""
 
     # YooKassa
     YOOKASSA_SHOP_ID: str = ""

@@ -78,3 +78,12 @@ async def test_list_events_public(
     data = resp.json()
     assert "data" in data
     assert "total" in data
+
+
+async def test_public_settings_no_auth(client: AsyncClient, db_session: AsyncSession):
+    """GET /settings/public returns public settings without auth."""
+    resp = await client.get("/api/v1/settings/public")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "data" in data
+    assert isinstance(data["data"], dict)

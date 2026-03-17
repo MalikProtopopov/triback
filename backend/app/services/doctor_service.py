@@ -42,6 +42,7 @@ from app.schemas.doctor_admin import (
     PortalUserListItem,
     SubscriptionNested,
 )
+from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 from app.tasks.email_tasks import (
     send_custom_email,
@@ -453,17 +454,17 @@ class DoctorAdminService:
             bio=dp.bio,
             public_email=dp.public_email,
             public_phone=dp.public_phone,
-            photo_url=dp.photo_url,
+            photo_url=file_service.build_media_url(dp.photo_url),
             moderation_status=dp.status,
             has_medical_diploma=dp.has_medical_diploma,
-            diploma_photo_url=dp.diploma_photo_url,
+            diploma_photo_url=file_service.build_media_url(dp.diploma_photo_url),
             slug=dp.slug,
             documents=[
                 DocumentNested(
                     id=d.id,
                     document_type=d.document_type,
                     original_filename=d.original_filename,
-                    file_url=d.file_url,
+                    file_url=file_service.build_media_url(d.file_url),
                     file_size=d.file_size,
                     mime_type=d.mime_type,
                     uploaded_at=d.uploaded_at,
@@ -491,8 +492,8 @@ class DoctorAdminService:
                     sort_order=b.sort_order,
                     title=b.title,
                     content=b.content,
-                    media_url=b.media_url,
-                    thumbnail_url=b.thumbnail_url,
+                    media_url=file_service.build_media_url(b.media_url),
+                    thumbnail_url=file_service.build_media_url(b.thumbnail_url),
                     link_url=b.link_url,
                     link_label=b.link_label,
                     device_type=b.device_type,

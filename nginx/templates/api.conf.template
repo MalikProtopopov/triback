@@ -10,6 +10,17 @@ server {
     add_header X-XSS-Protection "1; mode=block";
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+    location /media/ {
+        proxy_pass http://minio:9000/${S3_BUCKET}/;
+        proxy_set_header Host minio:9000;
+        proxy_hide_header x-amz-request-id;
+        proxy_hide_header x-amz-id-2;
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
+    }
+
     location / {
         proxy_pass http://backend:8000;
         proxy_set_header Host $host;

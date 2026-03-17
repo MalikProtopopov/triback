@@ -19,6 +19,7 @@ from app.schemas.profile import (
     PublicProfileResponse,
     PublicProfileUpdate,
 )
+from app.services import file_service
 from app.services.profile_service import ProfileService
 
 router = APIRouter(prefix="/profile")
@@ -67,7 +68,7 @@ async def get_personal(
         clinic_name=profile.clinic_name,
         position=profile.position,
         academic_degree=profile.academic_degree,
-        diploma_photo_url=profile.diploma_photo_url,
+        diploma_photo_url=file_service.build_media_url(profile.diploma_photo_url),
         colleague_contacts=profile.colleague_contacts,
         documents=documents,
     )
@@ -114,7 +115,7 @@ async def upload_diploma_photo(
     svc = ProfileService(db)
     s3_key = await svc.upload_diploma_photo(user_id, file)
     return DiplomaPhotoResponse(
-        diploma_photo_url=s3_key,
+        diploma_photo_url=file_service.build_media_url(s3_key),
         message="Фото диплома загружено",
     )
 
@@ -180,7 +181,7 @@ async def upload_photo(
     svc = ProfileService(db)
     s3_key = await svc.upload_photo(user_id, file)
     return PhotoUploadResponse(
-        photo_url=s3_key,
+        photo_url=file_service.build_media_url(s3_key),
         message="Фото профиля обновлено",
     )
 

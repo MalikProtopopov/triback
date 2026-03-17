@@ -67,6 +67,21 @@ services:
     volumes:
       - minio_data:/data
 
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb local/triho-dev --ignore-existing;
+      mc anonymous set download local/triho-dev;
+      echo 'MinIO bucket ready with public read';
+      exit 0;
+      "
+    restart: "no"
+
 volumes:
   postgres_data:
   redis_data:

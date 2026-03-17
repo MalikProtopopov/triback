@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.models.content import ContentBlock
 from app.schemas.content_blocks import ContentBlockListResponse, ContentBlockResponse
+from app.services import file_service
 
 logger = structlog.get_logger(__name__)
 
@@ -41,8 +42,8 @@ def _block_to_response(block: ContentBlock) -> ContentBlockResponse:
         sort_order=block.sort_order,
         title=block.title,
         content=block.content,
-        media_url=block.media_url,
-        thumbnail_url=block.thumbnail_url,
+        media_url=file_service.build_media_url(block.media_url),
+        thumbnail_url=file_service.build_media_url(block.thumbnail_url),
         link_url=block.link_url,
         link_label=block.link_label,
         device_type=block.device_type,

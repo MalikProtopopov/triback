@@ -38,8 +38,8 @@
 
 | Endpoint из ТЗ | Статус | Комментарий |
 |----------------|--------|-------------|
-| `GET /api/v1/pages/home` (контент hero, миссия) | **Нет** | Использовать `GET /api/v1/admin/settings` для получения контактов. Hero/миссию можно захардкодить на фронте или добавить через `site_settings` |
-| `GET /api/v1/settings/public` (контакты, бот) | **Нет** | Данные можно получить через `GET /api/v1/admin/settings` (требует auth). Нужен публичный endpoint или захардкодить на фронте |
+| `GET /api/v1/pages/home` (контент hero, миссия) | **Нет** | Использовать `GET /api/v1/settings/public` для контактов. Hero/миссию можно захардкодить на фронте или добавить через `site_settings` |
+| `GET /api/v1/settings/public` (контакты, бот) | **Готов** | Публичные настройки без auth. Whitelist: contact_email, contact_phone, telegram_bot_link, site_name, site_description |
 | `GET /api/v1/events/{id}/check-price` | **Нет** | Цена определяется на клиенте: если JWT → цена = `member_price` (при активной подписке) или `price`. Бекенд сам определит при `POST /register` |
 | Content Blocks CRUD (`/api/v1/admin/content-blocks`) | **Готов** | CRUD + reorder реализованы |
 | `GET /api/v1/specializations` | **Нет** | Фильтр по специализации = строковый query param `specialization` в `GET /doctors`. Список специализаций можно собрать из результатов |
@@ -307,7 +307,7 @@ POST /api/v1/events/{event_id}/confirm-guest-registration
 
 | Страница | URL | Endpoints |
 |----------|-----|-----------|
-| Главная | `/` | `GET /events?period=upcoming&limit=4`, `GET /articles?limit=3`, `GET /seo/home` |
+| Главная | `/` | `GET /events?period=upcoming&limit=4`, `GET /articles?limit=3`, `GET /seo/home`, `GET /settings/public` |
 | Каталог врачей | `/doctors` | `GET /doctors?limit=12&offset=0&city_id=&specialization=&search=`, `GET /cities` |
 | Профиль врача | `/doctors/{id}` | `GET /doctors/{id}` |
 | Город (врачи) | `/cities/{slug}` | `GET /doctors?city_slug={slug}`, `GET /cities?with_doctors=true` |
@@ -424,7 +424,7 @@ POST /api/v1/events/{event_id}/confirm-guest-registration
 
 | # | Задача | Приоритет | Описание |
 |---|--------|-----------|----------|
-| 1 | `GET /api/v1/settings/public` | **P0** | Публичные настройки (контакты, ссылка бота) без авторизации. Сейчас `GET /admin/settings` требует auth |
+| 1 | `GET /api/v1/settings/public` | **Готов** | Публичные настройки (контакты, ссылка бота) без авторизации |
 | 2 | Контент главной (hero, миссия) | **P1** | Либо endpoint `GET /api/v1/pages/home`, либо через `site_settings`, либо захардкодить на фронте. Обсудить |
 | 3 | Content Blocks CRUD | **P2** | Модель `ContentBlock` в БД есть, но API нет. Нужны CRUD-эндпоинты в `/admin/content-blocks` + GET в публичных ответах `doctors/{id}`, `events/{slug}`, `articles/{slug}` |
 

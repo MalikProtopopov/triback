@@ -23,6 +23,15 @@ from app.schemas.settings_admin import (
 
 logger = structlog.get_logger(__name__)
 
+# Ключи site_settings, доступные публично (контакты, ссылка бота и т.д.)
+PUBLIC_SETTINGS_KEYS = frozenset({
+    "contact_email",
+    "contact_phone",
+    "telegram_bot_link",
+    "site_name",
+    "site_description",
+})
+
 
 class SettingsAdminService:
     def __init__(self, db: AsyncSession) -> None:
@@ -33,6 +42,15 @@ class SettingsAdminService:
     async def get_settings(self) -> dict[str, Any]:
         rows = (await self.db.execute(select(SiteSetting))).scalars().all()
         return {s.key: s.value for s in rows}
+
+    async def get_public_settings(self) -> dict[str, Any]:
+        """Возвращает только публичные настройки (whitelist)."""
+        rows = (await self.db.execute(select(SiteSetting))).scalars().all()
+        return {
+            s.key: s.value
+            for s in rows
+            if s.key in PUBLIC_SETTINGS_KEYS
+        }
 
     async def update_settings(self, admin_id: UUID, data: dict[str, Any]) -> dict[str, Any]:
         for key, value in data.items():

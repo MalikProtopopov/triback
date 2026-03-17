@@ -11,6 +11,12 @@ class SettingsResponse(BaseModel):
     data: dict[str, Any]
 
 
+class PublicSettingsResponse(BaseModel):
+    """Публичные настройки (контакты, бот) — без авторизации."""
+
+    data: dict[str, Any]
+
+
 class SettingsUpdateRequest(BaseModel):
     data: dict[str, Any]
 

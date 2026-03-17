@@ -16,6 +16,7 @@ from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.pagination import PaginatedResponse
 from app.models.profiles import DoctorProfile
 from app.models.voting import Vote, VotingCandidate, VotingSession
+from app.services import file_service
 
 logger = structlog.get_logger(__name__)
 
@@ -66,7 +67,7 @@ class VotingService:
             photo_url = None
             if profile:
                 full_name = f"{profile.last_name} {profile.first_name}"
-                photo_url = profile.photo_url
+                photo_url = file_service.build_media_url(profile.photo_url)
 
             candidates.append({
                 "id": str(cand.id),
@@ -139,7 +140,7 @@ class VotingService:
             photo_url = None
             if profile:
                 full_name = f"{profile.last_name} {profile.first_name}"
-                photo_url = profile.photo_url
+                photo_url = file_service.build_media_url(profile.photo_url)
             candidates.append({
                 "id": str(cand.id),
                 "doctor_profile_id": str(cand.doctor_profile_id),

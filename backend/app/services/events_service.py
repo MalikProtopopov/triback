@@ -125,7 +125,7 @@ class EventsAdminService:
                 status=ev.status,
                 registrations_count=reg_cnt,
                 revenue=float(rev),
-                cover_image_url=ev.cover_image_url,
+                cover_image_url=file_service.build_media_url(ev.cover_image_url),
             )
             for ev, reg_cnt, rev in rows
         ]
@@ -234,8 +234,8 @@ class EventsAdminService:
                 sort_order=b.sort_order,
                 title=b.title,
                 content=b.content,
-                media_url=b.media_url,
-                thumbnail_url=b.thumbnail_url,
+                media_url=file_service.build_media_url(b.media_url),
+                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
                 link_url=b.link_url,
                 link_label=b.link_label,
                 device_type=b.device_type,
@@ -247,7 +247,7 @@ class EventsAdminService:
         return EventDetailResponse(
             id=ev.id, title=ev.title, slug=ev.slug, description=ev.description,
             event_date=ev.event_date, event_end_date=ev.event_end_date,
-            location=ev.location, cover_image_url=ev.cover_image_url,
+            location=ev.location, cover_image_url=file_service.build_media_url(ev.cover_image_url),
             status=ev.status, created_by=ev.created_by, created_at=ev.created_at,
             tariffs=tariffs, galleries=galleries, recordings=recordings,
             content_blocks=content_blocks,
@@ -535,7 +535,7 @@ class EventsAdminService:
             )
             self.db.add(photo)
             await self.db.flush()
-            photos.append(PhotoNested(id=photo.id, file_url=main_key, thumbnail_url=thumb_key))
+            photos.append(PhotoNested(id=photo.id, file_url=file_service.build_media_url(main_key), thumbnail_url=file_service.build_media_url(thumb_key)))
 
         await self.db.commit()
         return PhotoUploadResponse(uploaded=len(photos), photos=photos)

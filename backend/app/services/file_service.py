@@ -15,6 +15,20 @@ IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp"}
 DOCUMENT_MIMES = IMAGE_MIMES | {"application/pdf"}
 
 
+def build_media_url(s3_key: str | None) -> str | None:
+    """Turn an S3 object key into a full public URL.
+
+    Falls back to returning the raw key when ``S3_PUBLIC_URL`` is empty
+    (e.g. during tests or when the variable is not yet configured).
+    """
+    if not s3_key:
+        return None
+    base = settings.S3_PUBLIC_URL
+    if not base:
+        return s3_key
+    return f"{base.rstrip('/')}/{s3_key.lstrip('/')}"
+
+
 def _get_s3_session() -> aioboto3.Session:
     return aioboto3.Session()
 

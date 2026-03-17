@@ -32,9 +32,28 @@ from app.schemas.public import (
     RecordingListResponse,
 )
 from app.schemas.seo import SeoPageResponse
+from app.schemas.settings_admin import PublicSettingsResponse
+from app.services import file_service
 from app.services.public_service import PublicService
+from app.services.settings_service import SettingsAdminService
 
 router = APIRouter()
+
+
+# ── Public Settings ───────────────────────────────────────────────
+
+@router.get(
+    "/settings/public",
+    response_model=PublicSettingsResponse,
+    summary="Публичные настройки",
+)
+async def get_public_settings(
+    db: AsyncSession = Depends(get_db_session),
+) -> PublicSettingsResponse:
+    """Контакты, ссылка на бота и др. публичные настройки. Без авторизации."""
+    svc = SettingsAdminService(db)
+    data = await svc.get_public_settings()
+    return PublicSettingsResponse(data=data)
 
 
 # ── Cities ────────────────────────────────────────────────────────
@@ -277,7 +296,7 @@ async def list_event_galleries(
             "title": g.title,
             "access_level": g.access_level,
             "photos": [
-                {"id": str(p.id), "file_url": p.file_url, "thumbnail_url": p.thumbnail_url, "caption": p.caption}
+                {"id": str(p.id), "file_url": file_service.build_media_url(p.file_url), "thumbnail_url": file_service.build_media_url(p.thumbnail_url), "caption": p.caption}
                 for p in photos
             ],
         })
@@ -433,7 +452,7 @@ async def list_organization_documents(
                 "title": d.title,
                 "slug": d.slug,
                 "content": d.content,
-                "file_url": d.file_url,
+                "file_url": file_service.build_media_url(d.file_url),
             }
             for d in docs
         ]
@@ -485,7 +504,7 @@ async def get_organization_document(
         title=doc.title,
         slug=doc.slug,
         content=doc.content,
-        file_url=doc.file_url,
+        file_url=file_service.build_media_url(doc.file_url),
         content_blocks=[
             ContentBlockPublicNested(
                 id=str(b.id),
@@ -493,8 +512,8 @@ async def get_organization_document(
                 sort_order=b.sort_order,
                 title=b.title,
                 content=b.content,
-                media_url=b.media_url,
-                thumbnail_url=b.thumbnail_url,
+                media_url=file_service.build_media_url(b.media_url),
+                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
                 link_url=b.link_url,
                 link_label=b.link_label,
                 device_type=b.device_type,

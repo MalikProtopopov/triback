@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.exceptions import NotFoundError
+from app.services import file_service
 from app.models.cities import City
 from app.services.content_block_service import list_blocks_for_entity
 from app.models.content import Article, ArticleTheme, ArticleThemeAssignment
@@ -203,7 +204,7 @@ class PublicService:
             specialization=dp.specialization.name if dp.specialization else None,
             academic_degree=dp.academic_degree,
             bio=dp.bio,
-            photo_url=dp.photo_url,
+            photo_url=file_service.build_media_url(dp.photo_url),
             public_phone=dp.public_phone,
             public_email=dp.public_email,
             slug=dp.slug,
@@ -242,7 +243,7 @@ class PublicService:
             title=f"{full_name} — врач-трихолог{f' в г. {city_name}' if city_name else ''} | РОТА",
             description=f"Публичный профиль врача-трихолога {full_name}.{f' {dp.clinic_name}, {city_name}.' if dp.clinic_name and city_name else ''}",
             og_type="profile",
-            og_image=dp.photo_url,
+            og_image=file_service.build_media_url(dp.photo_url),
             twitter_card="summary_large_image",
         )
 
@@ -254,8 +255,8 @@ class PublicService:
                 sort_order=b.sort_order,
                 title=b.title,
                 content=b.content,
-                media_url=b.media_url,
-                thumbnail_url=b.thumbnail_url,
+                media_url=file_service.build_media_url(b.media_url),
+                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
                 link_url=b.link_url,
                 link_label=b.link_label,
                 device_type=b.device_type,
@@ -274,7 +275,7 @@ class PublicService:
             specialization=dp.specialization.name if dp.specialization else None,
             academic_degree=dp.academic_degree,
             bio=dp.bio,
-            photo_url=dp.photo_url,
+            photo_url=file_service.build_media_url(dp.photo_url),
             public_phone=dp.public_phone,
             public_email=dp.public_email,
             slug=dp.slug,
@@ -343,7 +344,7 @@ class PublicService:
             event_date=ev.event_date,
             event_end_date=ev.event_end_date,
             location=ev.location,
-            cover_image_url=ev.cover_image_url,
+            cover_image_url=file_service.build_media_url(ev.cover_image_url),
             tariffs=tariffs,
             status=ev.status,
         )
@@ -386,7 +387,7 @@ class PublicService:
                 access_level=g.access_level,
                 photos_count=len(g.photos),
                 preview_photos=[
-                    PreviewPhotoNested(thumbnail_url=p.thumbnail_url)
+                    PreviewPhotoNested(thumbnail_url=file_service.build_media_url(p.thumbnail_url))
                     for p in g.photos[:4]
                 ],
             )
@@ -410,7 +411,7 @@ class PublicService:
             title=f"{ev.title} | РОТА",
             description=ev.description[:160] if ev.description else None,
             og_type="event",
-            og_image=ev.cover_image_url,
+            og_image=file_service.build_media_url(ev.cover_image_url),
             twitter_card="summary_large_image",
         )
 
@@ -422,8 +423,8 @@ class PublicService:
                 sort_order=b.sort_order,
                 title=b.title,
                 content=b.content,
-                media_url=b.media_url,
-                thumbnail_url=b.thumbnail_url,
+                media_url=file_service.build_media_url(b.media_url),
+                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
                 link_url=b.link_url,
                 link_label=b.link_label,
                 device_type=b.device_type,
@@ -439,7 +440,7 @@ class PublicService:
             event_date=ev.event_date,
             event_end_date=ev.event_end_date,
             location=ev.location,
-            cover_image_url=ev.cover_image_url,
+            cover_image_url=file_service.build_media_url(ev.cover_image_url),
             tariffs=tariffs,
             galleries=galleries,
             recordings=recordings,
@@ -488,7 +489,7 @@ class PublicService:
                 slug=a.slug,
                 title=a.title,
                 excerpt=a.excerpt,
-                cover_image_url=a.cover_image_url,
+                cover_image_url=file_service.build_media_url(a.cover_image_url),
                 published_at=a.published_at,
                 themes=[
                     ThemeNested(id=ta.theme.id, slug=ta.theme.slug, title=ta.theme.title)
@@ -548,7 +549,7 @@ class PublicService:
             title=seo_title,
             description=seo_desc,
             og_type="article",
-            og_image=article.cover_image_url,
+            og_image=file_service.build_media_url(article.cover_image_url),
             twitter_card="summary_large_image",
         )
 
@@ -560,8 +561,8 @@ class PublicService:
                 sort_order=b.sort_order,
                 title=b.title,
                 content=b.content,
-                media_url=b.media_url,
-                thumbnail_url=b.thumbnail_url,
+                media_url=file_service.build_media_url(b.media_url),
+                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
                 link_url=b.link_url,
                 link_label=b.link_label,
                 device_type=b.device_type,
@@ -575,7 +576,7 @@ class PublicService:
             title=article.title,
             content=article.content,
             excerpt=article.excerpt,
-            cover_image_url=article.cover_image_url,
+            cover_image_url=file_service.build_media_url(article.cover_image_url),
             published_at=article.published_at,
             themes=[
                 ThemeNested(id=ta.theme.id, slug=ta.theme.slug, title=ta.theme.title)

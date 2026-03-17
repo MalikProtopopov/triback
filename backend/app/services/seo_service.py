@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.models.content import PageSeo
 from app.schemas.seo import SeoPageCreate, SeoPageResponse, SeoPageUpdate
+from app.services import file_service
 
 
 class SeoService:
@@ -84,7 +85,7 @@ class SeoService:
             description=page.description,
             og_title=page.og_title,
             og_description=page.og_description,
-            og_image_url=page.og_image_url,
+            og_image_url=file_service.build_media_url(page.og_image_url),
             og_url=page.og_url,
             og_type=page.og_type,
             twitter_card=page.twitter_card,

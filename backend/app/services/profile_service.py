@@ -104,7 +104,7 @@ class ProfileService:
             "bio": profile.bio,
             "public_email": profile.public_email,
             "public_phone": profile.public_phone,
-            "photo_url": profile.photo_url,
+            "photo_url": file_service.build_media_url(profile.photo_url),
             "city": city_data,
             "clinic_name": profile.clinic_name,
             "academic_degree": profile.academic_degree,
