@@ -74,6 +74,7 @@ class PublicProfileUpdate(BaseModel):
 class PhotoUploadResponse(BaseModel):
     photo_url: str
     message: str
+    pending_moderation: bool = False
 
 
 class DiplomaPhotoResponse(BaseModel):

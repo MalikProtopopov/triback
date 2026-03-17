@@ -46,7 +46,7 @@ from app.tasks.email_tasks import (
 
 logger = structlog.get_logger(__name__)
 
-LAPSE_THRESHOLD_DAYS = 90
+LAPSE_THRESHOLD_DAYS = 60
 
 _YOOKASSA_NETWORKS: list[IPv4Network | IPv6Network] = []
 

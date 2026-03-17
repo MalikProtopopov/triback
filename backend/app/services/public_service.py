@@ -20,6 +20,7 @@ from app.services.content_block_service import list_blocks_for_entity
 from app.models.content import Article, ArticleTheme, ArticleThemeAssignment
 from app.models.events import Event, EventGallery
 from app.models.profiles import DoctorProfile, Specialization
+from app.models.subscriptions import Subscription
 from app.schemas.public import (
     ArticleDetailResponse,
     ArticleListItem,
@@ -42,6 +43,23 @@ from app.schemas.public import (
 logger = structlog.get_logger(__name__)
 
 CITIES_CACHE_TTL = 300
+
+
+def _has_active_subscription() -> Any:
+    """Correlated EXISTS subquery: doctor has at least one active subscription."""
+    return (
+        select(Subscription.id)
+        .where(
+            Subscription.user_id == DoctorProfile.user_id,
+            Subscription.status == "active",
+            or_(
+                Subscription.ends_at.is_(None),
+                Subscription.ends_at > func.now(),
+            ),
+        )
+        .correlate(DoctorProfile)
+        .exists()
+    )
 
 
 class PublicService:
@@ -84,7 +102,10 @@ class PublicService:
     async def _cities_with_doctors(self) -> list[dict[str, Any]]:
         doctor_count = (
             func.count(DoctorProfile.id)
-            .filter(DoctorProfile.status == "active")
+            .filter(
+                DoctorProfile.status == "active",
+                _has_active_subscription(),
+            )
             .label("doctors_count")
         )
         q = (
@@ -106,7 +127,10 @@ class PublicService:
     async def get_city(self, slug: str) -> CityWithDoctorsResponse:
         doctor_count = (
             func.count(DoctorProfile.id)
-            .filter(DoctorProfile.status == "active")
+            .filter(
+                DoctorProfile.status == "active",
+                _has_active_subscription(),
+            )
             .label("doctors_count")
         )
         q = (
@@ -134,16 +158,17 @@ class PublicService:
         specialization: str | None = None,
         search: str | None = None,
     ) -> dict[str, Any]:
+        active_sub = _has_active_subscription()
         base = (
             select(DoctorProfile)
             .options(
                 joinedload(DoctorProfile.city),
                 joinedload(DoctorProfile.specialization),
             )
-            .where(DoctorProfile.status == "active")
+            .where(DoctorProfile.status == "active", active_sub)
         )
         count_q = select(func.count(DoctorProfile.id)).where(
-            DoctorProfile.status == "active"
+            DoctorProfile.status == "active", active_sub
         )
 
         filters: list[Any] = []
@@ -227,6 +252,7 @@ class PublicService:
                 and_(
                     id_filter,
                     DoctorProfile.status == "active",
+                    _has_active_subscription(),
                 )
             )
         )

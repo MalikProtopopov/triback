@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -144,7 +144,8 @@ class ProfileService:
     # Photo upload with resize
     # ------------------------------------------------------------------
 
-    async def upload_photo(self, user_id: UUID, upload: UploadFile) -> str:
+    async def upload_photo(self, user_id: UUID, upload: UploadFile) -> dict:
+        """Upload photo to S3 and create/merge a pending draft for moderation."""
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == user_id)
         )
@@ -158,6 +159,36 @@ class ProfileService:
             max_size_mb=5,
         )
 
-        profile.photo_url = main_key
+        draft_result = await self.db.execute(
+            select(DoctorProfileChange).where(
+                and_(
+                    DoctorProfileChange.doctor_profile_id == profile.id,
+                    DoctorProfileChange.status == "pending",
+                )
+            )
+        )
+        existing_draft = draft_result.scalar_one_or_none()
+
+        if existing_draft:
+            updated_changes = dict(existing_draft.changes)
+            updated_changes["photo_url"] = main_key
+            existing_draft.changes = updated_changes
+            if "photo_url" not in existing_draft.changed_fields:
+                existing_draft.changed_fields = [
+                    *existing_draft.changed_fields, "photo_url"
+                ]
+        else:
+            draft = DoctorProfileChange(
+                doctor_profile_id=profile.id,
+                changes={"photo_url": main_key},
+                changed_fields=["photo_url"],
+                status="pending",
+            )
+            self.db.add(draft)
+
         await self.db.commit()
-        return main_key
+
+        return {
+            "photo_url": file_service.build_media_url(main_key),
+            "pending_moderation": True,
+        }

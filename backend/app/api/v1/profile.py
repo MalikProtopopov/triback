@@ -179,10 +179,11 @@ async def upload_photo(
     - **401** — не авторизован
     """
     svc = ProfileService(db)
-    s3_key = await svc.upload_photo(user_id, file)
+    result = await svc.upload_photo(user_id, file)
     return PhotoUploadResponse(
-        photo_url=file_service.build_media_url(s3_key),
-        message="Фото профиля обновлено",
+        photo_url=result["photo_url"],
+        message="Фото загружено и отправлено на модерацию",
+        pending_moderation=result["pending_moderation"],
     )
 
 
