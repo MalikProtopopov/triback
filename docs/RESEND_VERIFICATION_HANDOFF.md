@@ -118,3 +118,23 @@ if (res.ok) {
 - [ ] Обработка 429 (сообщение + отключение кнопки на 10 мин)
 - [ ] Обработка 422 (подсветка поля email)
 - [ ] Страница `/auth/verify-email?token=...` с вызовом `POST /auth/verify-email` и редиректом после успеха
+
+---
+
+## Отладка: email_verified остаётся false после перехода по ссылке
+
+**Симптом:** Пользователь перешёл по ссылке из письма, но при входе в ЛК снова требуется подтверждение (`GET /onboarding/status` возвращает `email_verified: false`).
+
+**Бекенд проверен:** flow работает. Интеграционный тест `test_verify_email_updates_onboarding_status` подтверждает: после `POST /verify-email` поле `email_verified_at` обновляется в БД, `GET /onboarding/status` возвращает `email_verified: true`.
+
+**Что проверить на фронте:**
+
+1. **Вызов API при загрузке страницы** — в Network должен быть запрос `POST /api/v1/auth/verify-email` с `{ "token": "..." }` при открытии `/auth/verify-email?token=...`. Если запроса нет — страница не вызывает API.
+
+2. **Чтение token из URL** — token берётся из query (`?token=...`). При редиректах или SPA-навигации token не должен теряться до вызова API.
+
+3. **Редирект после успеха** — после 200 от `POST /verify-email` нужен редирект на `/cabinet` или следующий шаг онбординга. На целевой странице вызывается `GET /onboarding/status` (без кэша).
+
+4. **Кэш** — `GET /onboarding/status` не должен кэшироваться. После подтверждения — свежий запрос.
+
+5. **Ручная проверка:** залогиниться → `GET /onboarding/status` → запросить resend → взять token из письма → `POST /verify-email` с `{ "token": "..." }` → сразу `GET /onboarding/status` с тем же Bearer. Если `email_verified: true` — бекенд ок, искать на фронте.

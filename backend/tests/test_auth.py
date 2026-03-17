@@ -1,5 +1,6 @@
-"""Auth endpoint tests — register, login, refresh, logout."""
+"""Auth endpoint tests — register, login, refresh, logout, verify-email."""
 
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from httpx import AsyncClient
@@ -11,6 +12,7 @@ REGISTER_URL = "/api/v1/auth/register"
 LOGIN_URL = "/api/v1/auth/login"
 REFRESH_URL = "/api/v1/auth/refresh"
 LOGOUT_URL = "/api/v1/auth/logout"
+VERIFY_EMAIL_URL = "/api/v1/auth/verify-email"
 
 
 async def test_register_success(client: AsyncClient):
@@ -154,3 +156,49 @@ async def test_register_short_password(client: AsyncClient):
         },
     )
     assert resp.status_code == 422
+
+
+async def test_verify_email_updates_onboarding_status(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    redis_mock: AsyncMock,
+):
+    """Verify that POST /verify-email sets email_verified_at and GET /onboarding/status returns email_verified: true."""
+    from tests.factories import assign_role, create_role, create_user
+
+    user = await create_user(
+        db_session,
+        email="verify_test@test.com",
+        email_verified_at=None,
+    )
+    role = await create_role(db_session, name="user")
+    await assign_role(db_session, user, role)
+    await db_session.commit()
+
+    # Simulate token stored by resend (or registration)
+    verify_token = "test-verify-token-123"
+    await redis_mock.set(f"email_verify:{verify_token}", str(user.id))
+
+    # POST verify-email (no auth required)
+    verify_resp = await client.post(
+        VERIFY_EMAIL_URL,
+        json={"token": verify_token},
+    )
+    assert verify_resp.status_code == 200
+
+    # Login and check onboarding status
+    login_resp = await client.post(
+        LOGIN_URL,
+        json={"email": "verify_test@test.com", "password": TEST_PASSWORD},
+    )
+    assert login_resp.status_code == 200
+    access_token = login_resp.json()["access_token"]
+
+    status_resp = await client.get(
+        "/api/v1/onboarding/status",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert data["email_verified"] is True
+    assert data["next_step"] != "verify_email"
