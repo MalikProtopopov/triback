@@ -101,7 +101,7 @@ class ProfileService:
                 .limit(1)
             )
             latest = latest_result.scalar_one_or_none()
-            if latest and latest.status == "rejected":
+            if latest and latest.status in ("rejected", "approved"):
                 draft = latest
 
         city_data = None

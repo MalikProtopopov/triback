@@ -64,16 +64,18 @@ COOKIE_DOMAIN=.trichologia.ru
 
 | Было | Стало |
 |------|-------|
-| `pending_draft` только при status=pending | `pending_draft` (или `draft`) при pending **и** при rejected |
+| `pending_draft` только при status=pending | `pending_draft` при pending, rejected **и** approved |
 | Нет полей rejection_reason, reviewed_at | Добавлены `rejection_reason`, `reviewed_at` в ответ |
 | При rejected черновик скрывался | Возвращается последний отклонённый с причиной и датой |
+| При approved `pending_draft` был null | Возвращается draft со `status=approved`, врач видит «Проверено модератором» |
 
 ### Логика `GET /profile/public`
 
 1. Если есть **pending** черновик → возвращаем его (`status=pending`, `rejection_reason=null`, `reviewed_at=null`)
-2. Если pending нет → ищем последний **rejected** (`ORDER BY reviewed_at DESC LIMIT 1`)
-3. Если есть rejected → возвращаем его с `status=rejected`, `rejection_reason`, `reviewed_at`, `changes`
-4. Если ничего нет → `draft: null` (или не включаем поле)
+2. Если pending нет → ищем последний черновик по времени (`ORDER BY coalesce(reviewed_at, submitted_at) DESC LIMIT 1`)
+3. Если последний **rejected** → возвращаем его с `status=rejected`, `rejection_reason`, `reviewed_at`, `changes`
+4. Если последний **approved** → возвращаем его с `status=approved`, `reviewed_at`, `rejection_reason=null` — врач видит, что профиль проверен модератором
+5. Если черновиков нет → `pending_draft: null`
 
 ### Расширенная схема `PendingDraftNested`
 
@@ -89,9 +91,9 @@ class PendingDraftNested(BaseModel):
 ### Изменённые файлы
 
 - `backend/app/schemas/profile.py` — расширен `PendingDraftNested`
-- `backend/app/services/profile_service.py` — обновлена логика `get_public`, загрузка rejected при отсутствии pending
+- `backend/app/services/profile_service.py` — обновлена логика `get_public`, загрузка rejected и approved при отсутствии pending
 - `backend/tests/factories.py` — фабрика `create_profile_change` принимает `status`, `rejection_reason`, `reviewed_at`
-- `backend/tests/test_profile.py` — тесты `test_get_public_returns_rejected_draft_with_reason`, `test_get_public_pending_draft_has_no_rejection`
+- `backend/tests/test_profile.py` — тесты для pending, rejected, approved (`test_get_public_returns_rejected_draft_with_reason`, `test_get_public_no_draft_when_latest_is_approved`, `test_get_public_no_draft_after_approved`)
 
 ---
 
@@ -131,7 +133,7 @@ class PendingDraftNested(BaseModel):
 |-----------|---------------|
 | Auth cookies | Клиентский фронт продолжает работать с `refresh_token` без изменений. Админка должна отправлять запросы с Origin `https://admin.*` — тогда получит `refresh_token_admin` |
 | GET /profile/public | Новые поля `rejection_reason`, `reviewed_at` — опциональные. Старые клиенты могут их игнорировать |
-| Draft при rejected | Новое поведение — клиент увидит причину отклонения, можно обновить UI для отображения |
+| Draft при rejected/approved | Новое поведение: rejected — причина отклонения; approved — бейдж «Проверено модератором» и дата |
 
 ---
 
@@ -140,7 +142,7 @@ class PendingDraftNested(BaseModel):
 Все тесты проходят (17 шт.):
 
 - `tests/test_auth.py` — login, refresh, logout, register, verify-email
-- `tests/test_profile.py` — onboarding, personal/profile, draft (pending + rejected)
+- `tests/test_profile.py` — onboarding, personal/profile, draft (pending, rejected, approved)
 
 Запуск:
 

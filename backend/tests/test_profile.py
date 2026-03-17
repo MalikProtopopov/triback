@@ -109,7 +109,7 @@ async def test_get_public_no_draft_when_latest_is_approved(
     doctor_user: User,
     db_session: AsyncSession,
 ):
-    """Если последний черновик approved — не показывать старый rejected."""
+    """Если последний черновик approved — возвращать draft со status=approved."""
     from datetime import UTC, datetime
 
     from tests.factories import create_doctor_profile, create_profile_change
@@ -135,7 +135,11 @@ async def test_get_public_no_draft_when_latest_is_approved(
     resp = await client.get("/api/v1/profile/public", headers=auth_headers_doctor)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["pending_draft"] is None
+    assert data["pending_draft"] is not None
+    assert data["pending_draft"]["status"] == "approved"
+    assert data["pending_draft"]["reviewed_at"] is not None
+    assert data["pending_draft"]["rejection_reason"] is None
+    assert data["pending_draft"]["changes"]["bio"] == "Approved bio"
 
 
 async def test_get_public_pending_draft_has_no_rejection(
@@ -179,7 +183,7 @@ async def test_get_public_no_draft_after_approved(
     doctor_user: User,
     db_session: AsyncSession,
 ):
-    """После approved черновика не показывать старый rejected (pending_draft = null)."""
+    """После approved черновика возвращать draft со status=approved, не старый rejected."""
     from datetime import UTC, datetime, timedelta
 
     from tests.factories import create_doctor_profile, create_profile_change
@@ -205,7 +209,9 @@ async def test_get_public_no_draft_after_approved(
     resp = await client.get("/api/v1/profile/public", headers=auth_headers_doctor)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["pending_draft"] is None
+    assert data["pending_draft"] is not None
+    assert data["pending_draft"]["status"] == "approved"
+    assert data["pending_draft"]["reviewed_at"] is not None
 
 
 async def test_profile_unauthenticated(client: AsyncClient):
