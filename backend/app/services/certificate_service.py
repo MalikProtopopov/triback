@@ -13,6 +13,7 @@ from reportlab.pdfgen import canvas
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.enums import DoctorStatus, SubscriptionStatus
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.certificates import Certificate
 from app.models.events import Event
@@ -31,7 +32,7 @@ class CertificateService:
         result = await self.db.execute(
             select(Subscription.id).where(
                 Subscription.user_id == user_id,
-                Subscription.status == "active",
+                Subscription.status == SubscriptionStatus.ACTIVE,
             ).limit(1)
         )
         return result.scalar_one_or_none() is not None
@@ -40,7 +41,7 @@ class CertificateService:
         result = await self.db.execute(
             select(DoctorProfile).where(
                 DoctorProfile.user_id == user_id,
-                DoctorProfile.status == "active",
+                DoctorProfile.status == DoctorStatus.ACTIVE,
             )
         )
         profile = result.scalar_one_or_none()

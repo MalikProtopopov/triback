@@ -20,7 +20,7 @@ from tests.factories import (
 @pytest.fixture
 def _allow_all_ips(monkeypatch):
     monkeypatch.setattr(
-        "app.services.subscription_service._is_ip_allowed", lambda ip: True
+        "app.services.payment_webhook_service.is_ip_allowed", lambda ip: True
     )
 
 
@@ -80,7 +80,7 @@ async def test_webhook_forbidden_ip_returns_403(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "app.services.subscription_service._is_ip_allowed", lambda ip: False
+        "app.services.payment_webhook_service.is_ip_allowed", lambda ip: False
     )
 
     async def _redis_set_always_true(key, value, **kwargs):

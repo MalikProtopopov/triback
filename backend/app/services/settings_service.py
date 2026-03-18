@@ -10,6 +10,7 @@ import structlog
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.enums import SubscriptionStatus
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.utils import generate_unique_slug
 from app.models.cities import City
@@ -289,7 +290,7 @@ class SettingsAdminService:
                 select(func.count(Subscription.id)).where(
                     and_(
                         Subscription.plan_id == plan_id,
-                        Subscription.status == "active",
+                        Subscription.status == SubscriptionStatus.ACTIVE,
                     )
                 )
             )

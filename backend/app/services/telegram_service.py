@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.enums import SubscriptionStatus
 from app.core.exceptions import ConflictError
 from app.models.subscriptions import Subscription
 from app.models.users import TelegramBinding
@@ -173,7 +174,7 @@ class TelegramService:
             await db.execute(
                 select(Subscription.id).where(
                     Subscription.user_id == binding.user_id,
-                    Subscription.status == "active",
+                    Subscription.status == SubscriptionStatus.ACTIVE,
                 )
             )
         ).scalar_one_or_none()

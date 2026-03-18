@@ -11,6 +11,7 @@ from jinja2 import BaseLoader, Environment
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.enums import NotificationStatus, SubscriptionStatus
 from app.models.subscriptions import Subscription
 from app.models.users import Notification, NotificationTemplate, TelegramBinding, User
 
@@ -54,7 +55,7 @@ class NotificationService:
             title=title,
             body=body,
             payload=payload,
-            status="pending",
+            status=NotificationStatus.PENDING,
         )
         self.db.add(notif)
         await self.db.flush()
@@ -79,7 +80,7 @@ class NotificationService:
             notif.sent_at = datetime.now(UTC)
         except Exception:
             logger.exception("notification_dispatch_failed", notif_id=str(notif.id))
-            notif.status = "failed"  # type: ignore[assignment]
+            notif.status = NotificationStatus.FAILED  # type: ignore[assignment]
 
         await self.db.commit()
         return notif
@@ -143,7 +144,7 @@ class NotificationService:
                 await self.db.execute(
                     select(Subscription).where(
                         and_(
-                            Subscription.status == "active",
+                            Subscription.status == SubscriptionStatus.ACTIVE,
                             Subscription.ends_at >= start,
                             Subscription.ends_at < end,
                         )

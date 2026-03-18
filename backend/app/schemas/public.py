@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.shared import ContentBlockPublicNested, ThemeNested
+
 # ── SEO ───────────────────────────────────────────────────────────
 
 class SeoNested(BaseModel):
@@ -16,21 +18,6 @@ class SeoNested(BaseModel):
     og_image: str | None = None
     twitter_card: str | None = "summary_large_image"
     canonical_url: str | None = None
-
-
-# ── Content blocks (shared) ───────────────────────────────────────
-
-class ContentBlockPublicNested(BaseModel):
-    id: str
-    block_type: str
-    sort_order: int
-    title: str | None = None
-    content: str | None = None
-    media_url: str | None = None
-    thumbnail_url: str | None = None
-    link_url: str | None = None
-    link_label: str | None = None
-    device_type: str
 
 
 # ── Cities ────────────────────────────────────────────────────────
@@ -188,11 +175,6 @@ class EventPublicDetailResponse(BaseModel):
 
 
 # ── Articles ──────────────────────────────────────────────────────
-
-class ThemeNested(BaseModel):
-    id: UUID
-    slug: str
-    title: str
 
 
 class ArticleListItem(BaseModel):

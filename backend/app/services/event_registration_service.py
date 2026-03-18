@@ -14,6 +14,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.enums import EventRegistrationStatus, EventStatus, PaymentStatus, SubscriptionStatus
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.models.events import Event, EventRegistration, EventTariff
 from app.models.subscriptions import Payment, Subscription
@@ -58,7 +59,7 @@ class EventRegistrationService:
         event = await self.db.get(Event, event_id)
         if not event:
             raise NotFoundError("Event not found")
-        if event.status not in ("upcoming", "ongoing"):
+        if event.status not in (EventStatus.UPCOMING, EventStatus.ONGOING):
             raise AppValidationError("Registration is closed for this event")
 
         if tariff.seats_limit is not None and tariff.seats_taken >= tariff.seats_limit:
@@ -125,7 +126,7 @@ class EventRegistrationService:
         event = await self.db.get(Event, event_id)
         if not event:
             raise NotFoundError("Event not found")
-        if event.status not in ("upcoming", "ongoing"):
+        if event.status not in (EventStatus.UPCOMING, EventStatus.ONGOING):
             raise AppValidationError("Registration is closed for this event")
 
         if tariff.seats_limit is not None and tariff.seats_taken >= tariff.seats_limit:
@@ -145,7 +146,7 @@ class EventRegistrationService:
             event_tariff_id=tariff.id,
             applied_price=applied_price,
             is_member_price=is_member_price,
-            status="pending",
+            status=EventRegistrationStatus.PENDING,
             guest_full_name=body.guest_full_name,
             guest_email=body.email,
             guest_workplace=body.guest_workplace,
@@ -219,7 +220,7 @@ class EventRegistrationService:
             event_tariff_id=tariff.id,
             applied_price=applied_price,
             is_member_price=is_member_price,
-            status="pending",
+            status=EventRegistrationStatus.PENDING,
             guest_full_name=body.guest_full_name,
             guest_email=body.guest_email,
             guest_workplace=body.guest_workplace,
@@ -286,14 +287,14 @@ class EventRegistrationService:
         fiscal_email: str | None,
     ) -> str | None:
         if applied_price <= 0:
-            payment.status = "succeeded"  # type: ignore[assignment]
-            reg.status = "confirmed"  # type: ignore[assignment]
+            payment.status = PaymentStatus.SUCCEEDED  # type: ignore[assignment]
+            reg.status = EventRegistrationStatus.CONFIRMED  # type: ignore[assignment]
             return None
 
         email_for_receipt = fiscal_email or receipt_email
-        from app.services.subscription_service import _build_receipt
+        from app.services.payment_utils import build_receipt
 
-        receipt = _build_receipt(
+        receipt = build_receipt(
             email=email_for_receipt,
             description=f"{event.title} — {tariff.name}",
             amount=Decimal(str(applied_price)),
@@ -394,7 +395,7 @@ class EventRegistrationService:
         result = await self.db.execute(
             select(Subscription.id).where(
                 Subscription.user_id == user_id,
-                Subscription.status == "active",
+                Subscription.status == SubscriptionStatus.ACTIVE,
             ).limit(1)
         )
         return result.scalar_one_or_none() is not None

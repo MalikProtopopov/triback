@@ -1,11 +1,15 @@
-"""Subscription service — pay, status, webhook handling, manual payments."""
+"""SubscriptionService — facade for subscription and payment operations.
+
+Core pay/status logic lives here; other operations are delegated to
+focused sub-services.  The class API is preserved for backward-compatibility
+with existing router imports.
+"""
 
 from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
 from typing import Any
 from uuid import UUID
 
@@ -17,85 +21,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.config import settings
-from app.core.exceptions import (
-    AppValidationError,
-    ForbiddenError,
-    NotFoundError,
-)
+from app.core.enums import PaymentStatus, ProductType, SubscriptionStatus
+from app.core.exceptions import AppValidationError, NotFoundError
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment, Plan, Subscription
-from app.schemas.payments import (
-    ManualPaymentRequest,
-    ManualPaymentResponse,
-    PaymentListItem,
-    PaymentListResponse,
-    PaymentsSummary,
-    PaymentUserNested,
-)
+from app.schemas.payments import ManualPaymentRequest, ManualPaymentResponse, PaymentListResponse
 from app.schemas.subscriptions import (
     CurrentSubscriptionNested,
     PayResponse,
     PlanNested,
     SubscriptionStatusResponse,
 )
+from app.services.payment_admin_service import PaymentAdminService
 from app.services.payment_service import YooKassaClient
-from app.tasks.email_tasks import (
-    send_payment_failed_notification,
-    send_payment_succeeded_notification,
-)
+from app.services.payment_user_service import PaymentUserService
+from app.services.payment_utils import LAPSE_THRESHOLD_DAYS, build_receipt
+from app.services.payment_webhook_service import PaymentWebhookService
 
 logger = structlog.get_logger(__name__)
 
-LAPSE_THRESHOLD_DAYS = 60
-
-_YOOKASSA_NETWORKS: list[IPv4Network | IPv6Network] = []
-
-
-def _get_yookassa_networks() -> list[IPv4Network | IPv6Network]:
-    global _YOOKASSA_NETWORKS  # noqa: PLW0603
-    if not _YOOKASSA_NETWORKS:
-        raw = getattr(settings, "YOOKASSA_IP_WHITELIST", "")
-        for cidr in raw.split(","):
-            cidr = cidr.strip()
-            if cidr:
-                _YOOKASSA_NETWORKS.append(ip_network(cidr, strict=False))
-    return _YOOKASSA_NETWORKS
-
-
-def _is_ip_allowed(client_ip: str) -> bool:
-    if not client_ip:
-        return False
-    networks = _get_yookassa_networks()
-    if not networks:
-        if settings.DEBUG:
-            logger.warning("yookassa_ip_whitelist_empty_debug_mode")
-            return True
-        logger.error("yookassa_ip_whitelist_empty_production")
-        return False
-    try:
-        addr: IPv4Address | IPv6Address = ip_address(client_ip)
-    except ValueError:
-        return False
-    return any(addr in net for net in networks)
-
-
-def _build_receipt(
-    email: str, description: str, amount: Decimal
-) -> dict[str, Any]:
-    """Build a 54-FZ compliant receipt payload for YooKassa."""
-    return {
-        "customer": {"email": email},
-        "items": [
-            {
-                "description": description[:128],
-                "quantity": "1",
-                "amount": {"value": str(amount), "currency": "RUB"},
-                "vat_code": 1,
-                "payment_subject": "service",
-                "payment_mode": "full_payment",
-            }
-        ],
-    }
+# Re-export for backward-compat (event_registration_service imports this)
+_build_receipt = build_receipt
 
 
 class SubscriptionService:
@@ -103,6 +49,9 @@ class SubscriptionService:
         self.db = db
         self.redis = redis
         self.yookassa = YooKassaClient()
+        self._webhook = PaymentWebhookService(db)
+        self._admin = PaymentAdminService(db)
+        self._user = PaymentUserService(db)
 
     # ── POST /subscriptions/pay ───────────────────────────────────
 
@@ -133,8 +82,8 @@ class SubscriptionService:
         sub = Subscription(
             user_id=user_id,
             plan_id=plan.id,
-            status="pending_payment",
-            is_first_year=product_type == "entry_fee",
+            status=SubscriptionStatus.PENDING_PAYMENT,
+            is_first_year=product_type == ProductType.ENTRY_FEE,
         )
         self.db.add(sub)
         await self.db.flush()
@@ -144,7 +93,7 @@ class SubscriptionService:
             amount=plan.price,
             product_type=product_type,
             payment_provider="yookassa",
-            status="pending",
+            status=PaymentStatus.PENDING,
             subscription_id=sub.id,
             idempotency_key=idempotency_key,
             description=f"{plan.name} — Ассоциация трихологов",
@@ -159,7 +108,7 @@ class SubscriptionService:
         user_row = await self.db.execute(select(User.email).where(User.id == user_id))
         user_email = user_row.scalar_one_or_none() or ""
 
-        receipt = _build_receipt(
+        receipt = build_receipt(
             email=user_email,
             description=payment.description or plan.name,
             amount=Decimal(str(plan.price)),
@@ -219,7 +168,7 @@ class SubscriptionService:
             .where(
                 and_(
                     Subscription.user_id == user_id,
-                    Subscription.status == "active",
+                    Subscription.status == SubscriptionStatus.ACTIVE,
                 )
             )
             .order_by(Subscription.ends_at.desc())
@@ -229,7 +178,7 @@ class SubscriptionService:
 
         if not latest_sub or latest_sub.ends_at is None:
             has_entry = await self._has_paid_entry_fee(user_id)
-            return "subscription" if has_entry else "entry_fee"
+            return ProductType.SUBSCRIPTION if has_entry else ProductType.ENTRY_FEE
 
         now = datetime.now(UTC)
         if latest_sub.ends_at.tzinfo is None:
@@ -238,16 +187,16 @@ class SubscriptionService:
             lapse = now - latest_sub.ends_at
 
         if lapse > timedelta(days=LAPSE_THRESHOLD_DAYS):
-            return "entry_fee"
-        return "subscription"
+            return ProductType.ENTRY_FEE
+        return ProductType.SUBSCRIPTION
 
     async def _has_paid_entry_fee(self, user_id: UUID) -> bool:
         result = await self.db.execute(
             select(func.count(Payment.id)).where(
                 and_(
                     Payment.user_id == user_id,
-                    Payment.product_type == "entry_fee",
-                    Payment.status == "succeeded",
+                    Payment.product_type == ProductType.ENTRY_FEE,
+                    Payment.status == PaymentStatus.SUCCEEDED,
                 )
             )
         )
@@ -280,7 +229,7 @@ class SubscriptionService:
         can_renew = False
         next_action: str | None = None
 
-        if latest.status == "active" and latest.ends_at:
+        if latest.status == SubscriptionStatus.ACTIVE and latest.ends_at:
             days_remaining = max(0, (latest.ends_at - now).days) if latest.ends_at.tzinfo else max(0, (latest.ends_at - now.replace(tzinfo=None)).days)
             current = CurrentSubscriptionNested(
                 id=latest.id,
@@ -292,455 +241,35 @@ class SubscriptionService:
             )
             if days_remaining < 30:
                 can_renew = True
-        elif latest.status == "expired":
+        elif latest.status == SubscriptionStatus.EXPIRED:
             next_action = "renew"
-        elif latest.status == "pending_payment":
+        elif latest.status == SubscriptionStatus.PENDING_PAYMENT:
             next_action = "complete_payment"
 
         return SubscriptionStatusResponse(
-            has_subscription=latest.status == "active",
+            has_subscription=latest.status == SubscriptionStatus.ACTIVE,
             current_subscription=current,
             has_paid_entry_fee=has_entry,
             can_renew=can_renew,
             next_action=next_action,
         )
 
-    # ── Webhook handling ──────────────────────────────────────────
+    # ── Delegated methods (preserve original API) ─────────────────
 
     async def handle_webhook(self, body: dict[str, Any], client_ip: str) -> None:
-        if not _is_ip_allowed(client_ip):
-            raise ForbiddenError("IP not in YooKassa whitelist")
+        return await self._webhook.handle_webhook(body, client_ip)
 
-        event = body.get("event", "")
-        obj = body.get("object", {})
-        external_id = obj.get("id")
+    async def list_user_payments(self, user_id: UUID, *, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        return await self._user.list_user_payments(user_id, limit=limit, offset=offset)
 
-        if not external_id:
-            logger.warning("webhook_missing_external_id", body=body)
-            return
+    async def get_user_receipt(self, user_id: UUID, payment_id: UUID) -> dict[str, Any]:
+        return await self._user.get_user_receipt(user_id, payment_id)
 
-        result = await self.db.execute(
-            select(Payment)
-            .where(Payment.external_payment_id == external_id)
-            .with_for_update()
-        )
-        payment = result.scalar_one_or_none()
+    async def list_payments(self, **kwargs: Any) -> PaymentListResponse:
+        return await self._admin.list_payments(**kwargs)
 
-        if not payment:
-            metadata = obj.get("metadata", {})
-            internal_id = metadata.get("internal_payment_id")
-            if internal_id:
-                result = await self.db.execute(
-                    select(Payment)
-                    .where(Payment.id == internal_id)
-                    .with_for_update()
-                )
-                payment = result.scalar_one_or_none()
+    async def create_manual_payment(self, admin_id: UUID, body: ManualPaymentRequest) -> ManualPaymentResponse:
+        return await self._admin.create_manual_payment(admin_id, body)
 
-        if not payment:
-            logger.warning("webhook_payment_not_found", external_id=external_id)
-            return
-
-        if event == "payment.succeeded":
-            await self._handle_payment_succeeded(payment, obj)
-        elif event == "payment.canceled":
-            await self._handle_payment_canceled(payment)
-        elif event == "refund.succeeded":
-            await self._handle_refund_succeeded(payment)
-        else:
-            logger.info("webhook_unknown_event", event=event)
-
-    async def _handle_payment_succeeded(
-        self, payment: Payment, obj: dict[str, Any]
-    ) -> None:
-        if payment.status == "succeeded":
-            return
-
-        from app.models.subscriptions import Receipt
-
-        now = datetime.now(UTC)
-        payment.status = "succeeded"  # type: ignore[assignment]
-        payment.paid_at = now
-
-        if payment.product_type in ("entry_fee", "subscription"):
-            await self._activate_subscription(payment, now)
-        elif payment.product_type == "event":
-            await self._confirm_event_registration(payment)
-
-        receipt_reg = obj.get("receipt_registration") or obj.get("receipt")
-        if receipt_reg:
-            receipt = Receipt(
-                payment_id=payment.id,
-                receipt_type="payment",
-                provider_receipt_id=receipt_reg.get("id") or receipt_reg.get("receipt_id"),
-                receipt_url=receipt_reg.get("receipt_url"),
-                fiscal_number=receipt_reg.get("fiscal_provider_id"),
-                fiscal_document=receipt_reg.get("fiscal_document_number"),
-                fiscal_sign=receipt_reg.get("fiscal_sign"),
-                receipt_data=receipt_reg,
-                amount=payment.amount,
-                status="succeeded",
-            )
-            self.db.add(receipt)
-
-        await self.db.commit()
-
-        from app.models.users import User
-
-        email_result = await self.db.execute(
-            select(User.email).where(User.id == payment.user_id)
-        )
-        email = email_result.scalar_one_or_none()
-        if email:
-            receipt_url = receipt_reg.get("receipt_url") if receipt_reg else None
-            await send_payment_succeeded_notification.kiq(
-                email, float(payment.amount), payment.product_type, receipt_url
-            )
-            from app.tasks.telegram_tasks import notify_admin_payment_received
-
-            await notify_admin_payment_received.kiq(
-                email, float(payment.amount), payment.product_type
-            )
-
-    async def _activate_subscription(self, payment: Payment, now: datetime) -> None:
-        if not payment.subscription_id:
-            return
-
-        sub = await self.db.get(Subscription, payment.subscription_id)
-        if not sub:
-            return
-
-        plan = await self.db.get(Plan, sub.plan_id)
-        duration_months = plan.duration_months if plan else 12
-
-        if sub.status != "active":
-            sub.status = "active"  # type: ignore[assignment]
-
-        prev_end = sub.ends_at
-        if prev_end and prev_end > now:
-            sub.starts_at = sub.starts_at or now
-        else:
-            sub.starts_at = now
-
-        from dateutil.relativedelta import relativedelta
-
-        sub.ends_at = (sub.starts_at or now) + relativedelta(months=duration_months)
-
-        dp_result = await self.db.execute(
-            select(DoctorProfile).where(DoctorProfile.user_id == payment.user_id)
-        )
-        dp = dp_result.scalar_one_or_none()
-        if dp and dp.status == "approved":
-            dp.status = "active"  # type: ignore[assignment]
-
-    async def _confirm_event_registration(self, payment: Payment) -> None:
-        if not payment.event_registration_id:
-            return
-        from app.models.events import EventRegistration
-
-        reg = await self.db.get(EventRegistration, payment.event_registration_id)
-        if reg and reg.status != "confirmed":
-            reg.status = "confirmed"  # type: ignore[assignment]
-
-    async def _handle_payment_canceled(self, payment: Payment) -> None:
-        if payment.status in ("succeeded", "failed"):
-            return
-        payment.status = "failed"  # type: ignore[assignment]
-
-        if payment.product_type == "event" and payment.event_registration_id:
-            await self._cancel_event_registration(payment)
-
-        await self.db.commit()
-
-        from app.models.users import User
-
-        email_result = await self.db.execute(
-            select(User.email).where(User.id == payment.user_id)
-        )
-        email = email_result.scalar_one_or_none()
-        if email:
-            await send_payment_failed_notification.kiq(email)
-
-    async def _cancel_event_registration(self, payment: Payment) -> None:
-        from app.models.events import EventRegistration, EventTariff
-
-        reg = await self.db.get(EventRegistration, payment.event_registration_id)
-        if not reg:
-            return
-        if reg.status != "cancelled":
-            reg.status = "cancelled"  # type: ignore[assignment]
-            tariff = await self.db.get(EventTariff, reg.event_tariff_id)
-            if tariff and tariff.seats_taken > 0:
-                tariff.seats_taken -= 1
-
-    async def _handle_refund_succeeded(self, payment: Payment) -> None:
-        if payment.status == "refunded":
-            return
-        payment.status = "refunded"  # type: ignore[assignment]
-
-        if payment.product_type == "event" and payment.event_registration_id:
-            await self._cancel_event_registration(payment)
-
-        await self.db.commit()
-
-    # ── Admin: initiate refund ────────────────────────────────────
-
-    async def initiate_refund(
-        self,
-        payment_id: UUID,
-        amount: float | None,
-        reason: str,
-    ) -> dict[str, Any]:
-        from app.schemas.payments import RefundResponse
-
-        payment = await self.db.get(Payment, payment_id)
-        if not payment:
-            raise NotFoundError("Payment not found")
-
-        if payment.status != "succeeded":
-            raise AppValidationError(
-                f"Cannot refund payment with status '{payment.status}'"
-            )
-        if not payment.external_payment_id:
-            raise AppValidationError(
-                "Cannot refund a manual payment through YooKassa"
-            )
-
-        refund_amount = Decimal(str(amount)) if amount else Decimal(str(payment.amount))
-        if refund_amount > Decimal(str(payment.amount)):
-            raise AppValidationError("Refund amount exceeds payment amount")
-
-        idempotency_key = f"refund-{payment.id}-{refund_amount}"
-        yookassa_resp = await self.yookassa.create_refund(
-            payment_id=payment.external_payment_id,
-            amount=refund_amount,
-            description=reason,
-            idempotency_key=idempotency_key,
-        )
-
-        logger.info(
-            "refund_initiated",
-            payment_id=str(payment_id),
-            refund_id=yookassa_resp.get("id"),
-            amount=str(refund_amount),
-        )
-
-        return RefundResponse(
-            refund_id=yookassa_resp.get("id", ""),
-            payment_id=str(payment.external_payment_id),
-            status=yookassa_resp.get("status", "pending"),
-            amount=float(refund_amount),
-        ).model_dump()
-
-    # ── Doctor: list own payments ─────────────────────────────────
-
-    async def list_user_payments(
-        self,
-        user_id: UUID,
-        *,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        from app.schemas.subscriptions import UserPaymentListItem
-
-        base = select(Payment).where(Payment.user_id == user_id)
-        count_q = select(func.count(Payment.id)).where(Payment.user_id == user_id)
-
-        total = (await self.db.execute(count_q)).scalar() or 0
-        rows = (
-            await self.db.execute(
-                base.order_by(Payment.created_at.desc()).offset(offset).limit(limit)
-            )
-        ).scalars().all()
-
-        items = [
-            UserPaymentListItem(
-                id=p.id,
-                amount=float(p.amount),
-                product_type=p.product_type,
-                status=p.status,
-                description=p.description,
-                paid_at=p.paid_at,
-                created_at=p.created_at,
-            )
-            for p in rows
-        ]
-        return {"data": items, "total": total, "limit": limit, "offset": offset}
-
-    async def get_user_receipt(
-        self, user_id: UUID, payment_id: UUID
-    ) -> dict[str, Any]:
-        from app.models.subscriptions import Receipt
-
-        payment = await self.db.get(Payment, payment_id)
-        if not payment or payment.user_id != user_id:
-            raise NotFoundError("Payment not found")
-
-        result = await self.db.execute(
-            select(Receipt).where(Receipt.payment_id == payment_id)
-        )
-        receipt = result.scalar_one_or_none()
-        if not receipt:
-            raise NotFoundError("Receipt not found for this payment")
-
-        return {
-            "id": receipt.id,
-            "receipt_type": receipt.receipt_type,
-            "provider_receipt_id": receipt.provider_receipt_id,
-            "receipt_url": receipt.receipt_url,
-            "fiscal_number": receipt.fiscal_number,
-            "fiscal_document": receipt.fiscal_document,
-            "fiscal_sign": receipt.fiscal_sign,
-            "amount": float(receipt.amount),
-            "status": receipt.status,
-        }
-
-    # ── Admin: list payments ──────────────────────────────────────
-
-    async def list_payments(
-        self,
-        *,
-        limit: int = 20,
-        offset: int = 0,
-        status: str | None = None,
-        product_type: str | None = None,
-        user_id: UUID | None = None,
-        date_from: datetime | None = None,
-        date_to: datetime | None = None,
-        sort_by: str = "created_at",
-        sort_order: str = "desc",
-    ) -> PaymentListResponse:
-        from app.models.users import User
-
-        base = (
-            select(Payment)
-            .join(User, Payment.user_id == User.id)
-            .options(joinedload(Payment.receipts))
-        )
-        count_q = select(func.count(Payment.id)).join(User, Payment.user_id == User.id)
-
-        filters: list[Any] = []
-        if status:
-            filters.append(Payment.status == status)
-        if product_type:
-            filters.append(Payment.product_type == product_type)
-        if user_id:
-            filters.append(Payment.user_id == user_id)
-        if date_from:
-            filters.append(Payment.created_at >= date_from)
-        if date_to:
-            filters.append(Payment.created_at <= date_to)
-
-        if filters:
-            base = base.where(and_(*filters))
-            count_q = count_q.where(and_(*filters))
-
-        total = (await self.db.execute(count_q)).scalar() or 0
-
-        sum_q = select(
-            func.coalesce(func.sum(Payment.amount).filter(Payment.status == "succeeded"), 0),
-            func.count(Payment.id).filter(Payment.status == "succeeded"),
-            func.count(Payment.id).filter(Payment.status == "pending"),
-        )
-        if filters:
-            sum_q = sum_q.where(and_(*filters))
-        sum_row = (await self.db.execute(sum_q)).one()
-
-        sort_col = Payment.created_at
-        base = base.order_by(sort_col.desc() if sort_order == "desc" else sort_col.asc())
-        base = base.offset(offset).limit(limit)
-
-        rows = (await self.db.execute(base)).unique().scalars().all()
-
-        pay_user_ids = list({p.user_id for p in rows})
-        user_map: dict[UUID, tuple[UUID, str]] = {}
-        dp_name_map: dict[UUID, str] = {}
-        if pay_user_ids:
-            u_q = await self.db.execute(
-                select(User.id, User.email).where(User.id.in_(pay_user_ids))
-            )
-            for uid, email in u_q.all():
-                user_map[uid] = (uid, email)
-            dp_q = await self.db.execute(
-                select(DoctorProfile.user_id, DoctorProfile.first_name, DoctorProfile.last_name)
-                .where(DoctorProfile.user_id.in_(pay_user_ids))
-            )
-            for uid, fn, ln in dp_q.all():
-                dp_name_map[uid] = f"{ln} {fn}"
-
-        items: list[PaymentListItem] = []
-        for p in rows:
-            u_info = user_map.get(p.user_id)
-            user_nested = PaymentUserNested(
-                id=u_info[0] if u_info else p.user_id,
-                email=u_info[1] if u_info else "",
-                full_name=dp_name_map.get(p.user_id),
-            )
-            items.append(
-                PaymentListItem(
-                    id=p.id,
-                    user=user_nested,
-                    amount=float(p.amount),
-                    product_type=p.product_type,
-                    payment_provider=p.payment_provider,
-                    status=p.status,
-                    description=p.description,
-                    has_receipt=bool(p.receipts) if hasattr(p, "receipts") else False,
-                    paid_at=p.paid_at,
-                    created_at=p.created_at,
-                )
-            )
-
-        return PaymentListResponse(
-            data=items,
-            summary=PaymentsSummary(
-                total_amount=float(sum_row[0]),
-                count_completed=int(sum_row[1]),
-                count_pending=int(sum_row[2]),
-            ),
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
-
-    # ── Admin: manual payment ─────────────────────────────────────
-
-    async def create_manual_payment(
-        self, admin_id: UUID, body: ManualPaymentRequest
-    ) -> ManualPaymentResponse:
-        from app.models.users import User
-
-        user = await self.db.get(User, body.user_id)
-        if not user:
-            raise NotFoundError("User not found")
-
-        now = datetime.now(UTC)
-
-        payment = Payment(
-            user_id=body.user_id,
-            amount=body.amount,
-            product_type=body.product_type,
-            payment_provider="manual",
-            status="succeeded",
-            subscription_id=body.subscription_id,
-            event_registration_id=body.event_registration_id,
-            description=body.description,
-            paid_at=now,
-        )
-        self.db.add(payment)
-        await self.db.flush()
-
-        if body.product_type in ("entry_fee", "subscription") and body.subscription_id:
-            await self._activate_subscription(payment, now)
-
-        await self.db.commit()
-
-        await send_payment_succeeded_notification.kiq(
-            user.email, float(body.amount), body.product_type
-        )
-
-        return ManualPaymentResponse(
-            payment_id=payment.id,
-            status="succeeded",
-            payment_provider="manual",
-        )
+    async def initiate_refund(self, payment_id: UUID, amount: float | None, reason: str) -> dict[str, Any]:
+        return await self._admin.initiate_refund(payment_id, amount, reason)

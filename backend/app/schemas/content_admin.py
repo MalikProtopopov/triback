@@ -1,10 +1,12 @@
 """Pydantic schemas for admin content management (articles, themes, org docs)."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.schemas.shared import ContentBlockNested, ThemeNested
 
 # ── Articles ──────────────────────────────────────────────────────
 
@@ -28,12 +30,6 @@ class ArticleUpdateRequest(BaseModel):
     seo_title: str | None = Field(None, max_length=255)
     seo_description: str | None = None
     theme_ids: list[UUID] | None = None
-
-
-class ThemeNested(BaseModel):
-    id: UUID
-    slug: str
-    title: str
 
 
 class ArticleAdminListItem(BaseModel):
@@ -62,7 +58,7 @@ class ArticleAdminDetailResponse(BaseModel):
     seo_title: str | None = None
     seo_description: str | None = None
     themes: list[ThemeNested] = []
-    content_blocks: list["ContentBlockNested"] = []
+    content_blocks: list[ContentBlockNested] = []
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -123,20 +119,6 @@ class OrgDocListItem(BaseModel):
     sort_order: int
     is_active: bool
     updated_at: datetime | None = None
-
-
-class ContentBlockNested(BaseModel):
-    id: UUID
-    block_type: str
-    sort_order: int
-    title: str | None = None
-    content: str | None = None
-    media_url: str | None = None
-    thumbnail_url: str | None = None
-    link_url: str | None = None
-    link_label: str | None = None
-    device_type: str
-    block_metadata: dict[str, Any] | None = None
 
 
 class OrgDocDetailResponse(BaseModel):

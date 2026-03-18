@@ -1,4 +1,9 @@
-"""Admin service for events, tariffs, galleries, recordings."""
+"""Admin service for events — facade + core CRUD and registrations.
+
+Delegates tariff and media operations to:
+  - EventTariffService
+  - EventMediaAdminService
+"""
 
 from __future__ import annotations
 
@@ -12,26 +17,23 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.enums import EventRegistrationStatus, EventStatus
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.core.utils import generate_unique_slug
 from app.models.events import (
     Event,
     EventGallery,
-    EventGalleryPhoto,
-    EventRecording,
     EventRegistration,
     EventTariff,
 )
 from app.models.profiles import DoctorProfile
 from app.models.users import User
-from app.schemas.content_admin import ContentBlockNested
 from app.schemas.events_admin import (
     EventCreatedResponse,
     EventDetailResponse,
     EventListItem,
     GalleryNested,
     GalleryResponse,
-    PhotoNested,
     PhotoUploadResponse,
     RecordingCreateRequest,
     RecordingNested,
@@ -45,17 +47,20 @@ from app.schemas.events_admin import (
     TariffNested,
     TariffResponse,
 )
+from app.schemas.shared import ContentBlockNested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
+from app.services.event_media_admin_service import EventMediaAdminService
+from app.services.event_tariff_service import EventTariffService
 
 logger = structlog.get_logger(__name__)
-
-VIDEO_MIMES = {"video/mp4", "video/webm", "video/quicktime"}
 
 
 class EventsAdminService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self._tariffs = EventTariffService(db)
+        self._media = EventMediaAdminService(db)
 
     # ── List ──────────────────────────────────────────────────────
 
@@ -80,18 +85,18 @@ class EventsAdminService:
                 func.sum(EventRegistration.applied_price).filter(
                     and_(
                         EventRegistration.event_id == Event.id,
-                        EventRegistration.status == "confirmed",
+                        EventRegistration.status == EventRegistrationStatus.CONFIRMED,
                     )
                 ),
                 0,
-            )
-            .label("revenue")
+            ).label("revenue")
         )
 
-        base = select(
-            Event, reg_count, revenue
-        ).outerjoin(EventRegistration, EventRegistration.event_id == Event.id).group_by(Event.id)
-
+        base = (
+            select(Event, reg_count, revenue)
+            .outerjoin(EventRegistration, EventRegistration.event_id == Event.id)
+            .group_by(Event.id)
+        )
         count_q = select(func.count(Event.id))
 
         filters: list[Any] = []
@@ -116,15 +121,10 @@ class EventsAdminService:
 
         items = [
             EventListItem(
-                id=ev.id,
-                title=ev.title,
-                slug=ev.slug,
-                event_date=ev.event_date,
-                event_end_date=ev.event_end_date,
-                location=ev.location,
-                status=ev.status,
-                registrations_count=reg_cnt,
-                revenue=float(rev),
+                id=ev.id, title=ev.title, slug=ev.slug,
+                event_date=ev.event_date, event_end_date=ev.event_end_date,
+                location=ev.location, status=ev.status,
+                registrations_count=reg_cnt, revenue=float(rev),
                 cover_image_url=file_service.build_media_url(ev.cover_image_url),
             )
             for ev, reg_cnt, rev in rows
@@ -151,34 +151,24 @@ class EventsAdminService:
         cover_url: str | None = None
         if cover_image:
             key = await file_service.upload_file(
-                cover_image,
-                path="events/covers",
-                allowed_types=file_service.IMAGE_MIMES,
-                max_size_mb=5,
+                cover_image, path="events/covers",
+                allowed_types=file_service.IMAGE_MIMES, max_size_mb=5,
             )
             cover_url = key
 
         event = Event(
-            title=title,
-            slug=slug,
-            description=description,
-            event_date=event_date,
-            event_end_date=event_end_date,
-            location=location,
-            status=status,
-            cover_image_url=cover_url,
-            created_by=admin_id,
+            title=title, slug=slug, description=description,
+            event_date=event_date, event_end_date=event_end_date,
+            location=location, status=status,
+            cover_image_url=cover_url, created_by=admin_id,
         )
         self.db.add(event)
         await self.db.commit()
         await self.db.refresh(event)
 
         return EventCreatedResponse(
-            id=event.id,
-            title=event.title,
-            slug=event.slug,
-            status=event.status,
-            created_at=event.created_at,
+            id=event.id, title=event.title, slug=event.slug,
+            status=event.status, created_at=event.created_at,
         )
 
     # ── Detail ────────────────────────────────────────────────────
@@ -229,17 +219,12 @@ class EventsAdminService:
         blocks = await list_blocks_for_entity(self.db, "event", ev.id)
         content_blocks = [
             ContentBlockNested(
-                id=b.id,
-                block_type=b.block_type,
-                sort_order=b.sort_order,
-                title=b.title,
-                content=b.content,
+                id=b.id, block_type=b.block_type, sort_order=b.sort_order,
+                title=b.title, content=b.content,
                 media_url=file_service.build_media_url(b.media_url),
                 thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                link_url=b.link_url,
-                link_label=b.link_label,
-                device_type=b.device_type,
-                block_metadata=b.block_metadata,
+                link_url=b.link_url, link_label=b.link_label,
+                device_type=b.device_type, block_metadata=b.block_metadata,
             )
             for b in blocks
         ]
@@ -247,7 +232,8 @@ class EventsAdminService:
         return EventDetailResponse(
             id=ev.id, title=ev.title, slug=ev.slug, description=ev.description,
             event_date=ev.event_date, event_end_date=ev.event_end_date,
-            location=ev.location, cover_image_url=file_service.build_media_url(ev.cover_image_url),
+            location=ev.location,
+            cover_image_url=file_service.build_media_url(ev.cover_image_url),
             status=ev.status, created_by=ev.created_by, created_at=ev.created_at,
             tariffs=tariffs, galleries=galleries, recordings=recordings,
             content_blocks=content_blocks,
@@ -256,10 +242,7 @@ class EventsAdminService:
     # ── Update ────────────────────────────────────────────────────
 
     async def update_event(
-        self,
-        event_id: UUID,
-        *,
-        data: dict[str, Any],
+        self, event_id: UUID, *, data: dict[str, Any],
         cover_image: UploadFile | None = None,
     ) -> EventDetailResponse:
         event = await self.db.get(Event, event_id)
@@ -294,7 +277,7 @@ class EventsAdminService:
                 select(func.count(EventRegistration.id)).where(
                     and_(
                         EventRegistration.event_id == event_id,
-                        EventRegistration.status == "confirmed",
+                        EventRegistration.status == EventRegistrationStatus.CONFIRMED,
                     )
                 )
             )
@@ -306,101 +289,23 @@ class EventsAdminService:
                 "Сначала отмените регистрации."
             )
 
-        event.status = "cancelled"  # type: ignore[assignment]
+        event.status = EventStatus.CANCELLED  # type: ignore[assignment]
         event.deleted_at = datetime.now(UTC)
         await self.db.commit()
-
-    # ── Tariffs ───────────────────────────────────────────────────
-
-    async def create_tariff(self, event_id: UUID, data: dict[str, Any]) -> TariffResponse:
-        event = await self.db.get(Event, event_id)
-        if not event:
-            raise NotFoundError("Event not found")
-
-        tariff = EventTariff(event_id=event_id, **data)
-        self.db.add(tariff)
-        await self.db.commit()
-        await self.db.refresh(tariff)
-        return self._tariff_to_response(tariff)
-
-    async def update_tariff(
-        self, event_id: UUID, tariff_id: UUID, data: dict[str, Any]
-    ) -> TariffResponse:
-        tariff = await self._get_tariff(event_id, tariff_id)
-
-        new_limit = data.get("seats_limit")
-        if new_limit is not None and new_limit < tariff.seats_taken:
-            raise AppValidationError(
-                f"seats_limit ({new_limit}) не может быть меньше seats_taken ({tariff.seats_taken})"
-            )
-
-        for field, value in data.items():
-            if value is not None and hasattr(tariff, field):
-                setattr(tariff, field, value)
-
-        await self.db.commit()
-        await self.db.refresh(tariff)
-        return self._tariff_to_response(tariff)
-
-    async def delete_tariff(self, event_id: UUID, tariff_id: UUID) -> None:
-        tariff = await self._get_tariff(event_id, tariff_id)
-
-        reg_count = (
-            await self.db.execute(
-                select(func.count(EventRegistration.id)).where(
-                    EventRegistration.event_tariff_id == tariff_id
-                )
-            )
-        ).scalar() or 0
-
-        if reg_count > 0:
-            raise AppValidationError("Невозможно удалить тариф с привязанными регистрациями")
-
-        await self.db.delete(tariff)
-        await self.db.commit()
-
-    async def _get_tariff(self, event_id: UUID, tariff_id: UUID) -> EventTariff:
-        result = await self.db.execute(
-            select(EventTariff).where(
-                and_(EventTariff.id == tariff_id, EventTariff.event_id == event_id)
-            )
-        )
-        tariff = result.scalar_one_or_none()
-        if not tariff:
-            raise NotFoundError("Tariff not found")
-        return tariff
-
-    def _tariff_to_response(self, t: EventTariff) -> TariffResponse:
-        return TariffResponse(
-            id=t.id, event_id=t.event_id, name=t.name,
-            description=t.description, conditions=t.conditions, details=t.details,
-            price=float(t.price), member_price=float(t.member_price),
-            benefits=t.benefits if isinstance(t.benefits, list) else [],
-            seats_limit=t.seats_limit, seats_taken=t.seats_taken,
-            is_active=t.is_active, sort_order=t.sort_order,
-            created_at=t.created_at,
-        )
 
     # ── Registrations ─────────────────────────────────────────────
 
     async def list_registrations(
-        self,
-        event_id: UUID,
-        *,
-        limit: int = 20,
-        offset: int = 0,
+        self, event_id: UUID, *, limit: int = 20, offset: int = 0,
         status: str | None = None,
     ) -> RegistrationListResponse:
         event = await self.db.get(Event, event_id)
         if not event:
             raise NotFoundError("Event not found")
 
-        base = (
-            select(EventRegistration)
-            .where(EventRegistration.event_id == event_id)
-        )
+        base = select(EventRegistration).where(EventRegistration.event_id == event_id)
         count_q = select(func.count(EventRegistration.id)).where(
-            EventRegistration.event_id == event_id
+            EventRegistration.event_id == event_id,
         )
 
         if status:
@@ -408,9 +313,7 @@ class EventsAdminService:
             count_q = count_q.where(EventRegistration.status == status)
 
         total = (await self.db.execute(count_q)).scalar() or 0
-        base = base.order_by(EventRegistration.created_at.desc())
-        base = base.offset(offset).limit(limit)
-
+        base = base.order_by(EventRegistration.created_at.desc()).offset(offset).limit(limit)
         regs = (await self.db.execute(base)).scalars().all()
 
         reg_user_ids = list({r.user_id for r in regs})
@@ -464,11 +367,19 @@ class EventsAdminService:
 
         summary_q = select(
             func.count(EventRegistration.id).label("total_registrations"),
-            func.count(EventRegistration.id).filter(EventRegistration.status == "confirmed").label("confirmed"),
-            func.count(EventRegistration.id).filter(EventRegistration.status == "pending").label("pending"),
-            func.count(EventRegistration.id).filter(EventRegistration.status == "cancelled").label("cancelled"),
+            func.count(EventRegistration.id).filter(
+                EventRegistration.status == EventRegistrationStatus.CONFIRMED
+            ).label("confirmed"),
+            func.count(EventRegistration.id).filter(
+                EventRegistration.status == EventRegistrationStatus.PENDING
+            ).label("pending"),
+            func.count(EventRegistration.id).filter(
+                EventRegistration.status == EventRegistrationStatus.CANCELLED
+            ).label("cancelled"),
             func.coalesce(
-                func.sum(EventRegistration.applied_price).filter(EventRegistration.status == "confirmed"), 0
+                func.sum(EventRegistration.applied_price).filter(
+                    EventRegistration.status == EventRegistrationStatus.CONFIRMED
+                ), 0,
             ).label("total_revenue"),
         ).where(EventRegistration.event_id == event_id)
         s = (await self.db.execute(summary_q)).one()
@@ -477,157 +388,43 @@ class EventsAdminService:
             data=items,
             summary=RegistrationSummary(
                 total_registrations=s.total_registrations,
-                confirmed=s.confirmed,
-                pending=s.pending,
-                cancelled=s.cancelled,
-                total_revenue=float(s.total_revenue),
+                confirmed=s.confirmed, pending=s.pending,
+                cancelled=s.cancelled, total_revenue=float(s.total_revenue),
             ),
-            total=total,
-            limit=limit,
-            offset=offset,
+            total=total, limit=limit, offset=offset,
         )
 
-    # ── Galleries ─────────────────────────────────────────────────
+    # ── Delegated: Tariffs ────────────────────────────────────────
+
+    async def create_tariff(self, event_id: UUID, data: dict[str, Any]) -> TariffResponse:
+        return await self._tariffs.create(event_id, data)
+
+    async def update_tariff(
+        self, event_id: UUID, tariff_id: UUID, data: dict[str, Any],
+    ) -> TariffResponse:
+        return await self._tariffs.update(event_id, tariff_id, data)
+
+    async def delete_tariff(self, event_id: UUID, tariff_id: UUID) -> None:
+        return await self._tariffs.delete(event_id, tariff_id)
+
+    # ── Delegated: Galleries + Recordings ─────────────────────────
 
     async def create_gallery(self, event_id: UUID, data: dict[str, Any]) -> GalleryResponse:
-        event = await self.db.get(Event, event_id)
-        if not event:
-            raise NotFoundError("Event not found")
-
-        gallery = EventGallery(event_id=event_id, **data)
-        self.db.add(gallery)
-        await self.db.commit()
-        await self.db.refresh(gallery)
-
-        return GalleryResponse(
-            id=gallery.id, event_id=gallery.event_id,
-            title=gallery.title, access_level=gallery.access_level,
-            created_at=gallery.created_at,
-        )
+        return await self._media.create_gallery(event_id, data)
 
     async def upload_photos(
-        self, event_id: UUID, gallery_id: UUID, files: list[UploadFile]
+        self, event_id: UUID, gallery_id: UUID, files: list[UploadFile],
     ) -> PhotoUploadResponse:
-        result = await self.db.execute(
-            select(EventGallery).where(
-                and_(EventGallery.id == gallery_id, EventGallery.event_id == event_id)
-            )
-        )
-        gallery = result.scalar_one_or_none()
-        if not gallery:
-            raise NotFoundError("Gallery not found")
-
-        if len(files) > 50:
-            raise AppValidationError("Максимум 50 файлов за раз")
-
-        photos: list[PhotoNested] = []
-        for f in files:
-            main_key, thumb_key = await file_service.upload_image_with_thumbnail(
-                f,
-                path=f"events/{event_id}/galleries/{gallery_id}",
-                max_size_mb=10,
-            )
-            photo = EventGalleryPhoto(
-                gallery_id=gallery_id,
-                file_url=main_key,
-                thumbnail_url=thumb_key,
-                sort_order=len(photos),
-            )
-            self.db.add(photo)
-            await self.db.flush()
-            photos.append(PhotoNested(id=photo.id, file_url=file_service.build_media_url(main_key), thumbnail_url=file_service.build_media_url(thumb_key)))
-
-        await self.db.commit()
-        return PhotoUploadResponse(uploaded=len(photos), photos=photos)
-
-    # ── Recordings ────────────────────────────────────────────────
+        return await self._media.upload_photos(event_id, gallery_id, files)
 
     async def create_recording(
-        self,
-        event_id: UUID,
-        data: RecordingCreateRequest,
+        self, event_id: UUID, data: RecordingCreateRequest,
         video_file: UploadFile | None = None,
     ) -> RecordingResponse:
-        event = await self.db.get(Event, event_id)
-        if not event:
-            raise NotFoundError("Event not found")
-
-        rec = EventRecording(
-            event_id=event_id,
-            title=data.title,
-            video_source=data.video_source,
-            access_level=data.access_level,
-            status=data.status,
-            duration_seconds=data.duration_seconds,
-        )
-
-        if data.video_source == "external":
-            rec.video_url = data.video_url
-        elif data.video_source == "uploaded" and video_file:
-            key = await file_service.upload_file(
-                video_file,
-                path=f"events/{event_id}/recordings",
-                allowed_types=VIDEO_MIMES,
-                max_size_mb=2048,
-            )
-            rec.video_file_key = key
-            rec.video_file_size = video_file.size
-            rec.video_mime_type = video_file.content_type
-
-        self.db.add(rec)
-        await self.db.commit()
-        await self.db.refresh(rec)
-        return await self._recording_to_response(rec)
+        return await self._media.create_recording(event_id, data, video_file)
 
     async def update_recording(
-        self,
-        event_id: UUID,
-        recording_id: UUID,
-        data: RecordingUpdateRequest,
+        self, event_id: UUID, recording_id: UUID, data: RecordingUpdateRequest,
         video_file: UploadFile | None = None,
     ) -> RecordingResponse:
-        result = await self.db.execute(
-            select(EventRecording).where(
-                and_(EventRecording.id == recording_id, EventRecording.event_id == event_id)
-            )
-        )
-        rec = result.scalar_one_or_none()
-        if not rec:
-            raise NotFoundError("Recording not found")
-
-        update_data = data.model_dump(exclude_none=True)
-        for field, value in update_data.items():
-            if hasattr(rec, field):
-                setattr(rec, field, value)
-
-        if video_file:
-            if rec.video_file_key:
-                await file_service.delete_file(rec.video_file_key)
-            key = await file_service.upload_file(
-                video_file,
-                path=f"events/{event_id}/recordings",
-                allowed_types=VIDEO_MIMES,
-                max_size_mb=2048,
-            )
-            rec.video_file_key = key
-            rec.video_file_size = video_file.size
-            rec.video_mime_type = video_file.content_type
-            rec.video_source = "uploaded"  # type: ignore[assignment]
-
-        await self.db.commit()
-        await self.db.refresh(rec)
-        return await self._recording_to_response(rec)
-
-    async def _recording_to_response(self, r: EventRecording) -> RecordingResponse:
-        playback_url: str | None = None
-        if r.video_file_key:
-            playback_url = await file_service.get_presigned_url(r.video_file_key)
-
-        return RecordingResponse(
-            id=r.id, event_id=r.event_id, title=r.title,
-            video_source=r.video_source, video_url=r.video_url,
-            video_playback_url=playback_url,
-            video_file_size=r.video_file_size, video_mime_type=r.video_mime_type,
-            duration_seconds=r.duration_seconds, access_level=r.access_level,
-            status=r.status, sort_order=r.sort_order, created_at=r.created_at,
-        )
+        return await self._media.update_recording(event_id, recording_id, data, video_file)

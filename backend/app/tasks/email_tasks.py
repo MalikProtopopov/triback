@@ -40,6 +40,20 @@ def _wrap_html(inner: str) -> str:
 </html>"""
 
 
+def _esc(value: str | None) -> str:
+    """Escape user-supplied text for safe HTML insertion."""
+    return html.escape(str(value)) if value else ""
+
+
+def _safe_url(url: str | None) -> str:
+    """Return URL only if it uses http(s) scheme, preventing javascript: injection."""
+    if not url:
+        return ""
+    if url.startswith(("https://", "http://")):
+        return html.escape(url, quote=True)
+    return ""
+
+
 def _button(url: str, label: str) -> str:
     return (
         f'<table cellpadding="0" cellspacing="0" style="margin:24px 0;">'
@@ -128,7 +142,7 @@ async def send_moderation_result_notification(
         title = "Профиль отклонён"
         msg = "К сожалению, ваш профиль не прошёл модерацию."
         if comment:
-            msg += f"<br><br><strong>Причина:</strong> {comment}"
+            msg += f"<br><br><strong>Причина:</strong> {_esc(comment)}"
         html = _wrap_html(
             f"<h2 style='margin:0 0 16px;color:#1f2937;'>{title}</h2>"
             f"<p style='color:#4b5563;line-height:1.6;'>{msg}</p>"
@@ -142,30 +156,31 @@ async def send_draft_result_notification(
     email: str, status: str, rejection_reason: str | None = None
 ) -> None:
     if status == "approved":
-        title = "Статья одобрена"
-        msg = "Ваша статья прошла модерацию и опубликована."
+        title = "Изменения профиля одобрены"
+        msg = "Ваши изменения публичного профиля прошли модерацию и применены."
     else:
-        title = "Статья отклонена"
-        msg = "Ваша статья не прошла модерацию."
+        title = "Изменения профиля отклонены"
+        msg = "Ваши изменения не прошли модерацию."
         if rejection_reason:
-            msg += f"<br><br><strong>Причина:</strong> {rejection_reason}"
+            msg += f"<br><br><strong>Причина:</strong> {_esc(rejection_reason)}"
 
     html = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1f2937;'>{title}</h2>"
         f"<p style='color:#4b5563;line-height:1.6;'>{msg}</p>"
+        f"{_button(_BASE_URL + '/profile', 'Перейти в профиль')}"
     )
     await send_smtp_email(email, f"{title} — {_BRAND}", html)
 
 
 @broker.task  # type: ignore[misc]
 async def send_reminder_notification(email: str, message: str | None = None) -> None:
-    text = message or "Ваша подписка скоро истекает. Не забудьте продлить членство."
-    html = _wrap_html(
+    text = _esc(message) if message else "Ваша подписка скоро истекает. Не забудьте продлить членство."
+    html_body = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1f2937;'>Напоминание</h2>"
         f"<p style='color:#4b5563;line-height:1.6;'>{text}</p>"
         f"{_button(_BASE_URL + '/subscription', 'Продлить подписку')}"
     )
-    await send_smtp_email(email, f"Напоминание — {_BRAND}", html)
+    await send_smtp_email(email, f"Напоминание — {_BRAND}", html_body)
 
 
 @broker.task  # type: ignore[misc]
@@ -181,17 +196,18 @@ async def send_payment_succeeded_notification(
     email: str, amount: float, product_type: str, receipt_url: str | None = None
 ) -> None:
     receipt_link = ""
-    if receipt_url:
-        receipt_link = f'<p><a href="{receipt_url}" style="color:#2563eb;">Скачать чек</a></p>'
+    safe_receipt = _safe_url(receipt_url)
+    if safe_receipt:
+        receipt_link = f'<p><a href="{safe_receipt}" style="color:#2563eb;">Скачать чек</a></p>'
 
-    html = _wrap_html(
+    html_body = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1f2937;'>Оплата прошла успешно</h2>"
         f"<p style='color:#4b5563;line-height:1.6;'>"
         f"Мы получили вашу оплату на сумму <strong>{amount:.2f} ₽</strong> "
-        f"за «{product_type}».</p>"
+        f"за «{_esc(product_type)}».</p>"
         f"{receipt_link}"
     )
-    await send_smtp_email(email, f"Оплата подтверждена — {_BRAND}", html)
+    await send_smtp_email(email, f"Оплата подтверждена — {_BRAND}", html_body)
 
 
 @broker.task  # type: ignore[misc]
@@ -212,13 +228,13 @@ async def send_event_verification_code(
     html = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1f2937;'>Код подтверждения</h2>"
         f"<p style='color:#4b5563;line-height:1.6;'>Ваш код для регистрации "
-        f"на мероприятие «{event_title}»:</p>"
+        f"на мероприятие «{_esc(event_title)}»:</p>"
         f"<div style='text-align:center;margin:24px 0;'>"
-        f"<span style='font-size:32px;font-weight:bold;letter-spacing:8px;color:#2563eb;'>{code}</span>"
+        f"<span style='font-size:32px;font-weight:bold;letter-spacing:8px;color:#2563eb;'>{_esc(code)}</span>"
         f"</div>"
         f"<p style='color:#9ca3af;font-size:13px;'>Код действителен 10 минут.</p>"
     )
-    await send_smtp_email(email, f"Код подтверждения — {event_title}", html)
+    await send_smtp_email(email, f"Код подтверждения — {_esc(event_title)}", html)
 
 
 @broker.task  # type: ignore[misc]
@@ -231,8 +247,8 @@ async def send_doctor_invite_email(
         f"<p style='color:#4b5563;line-height:1.6;'>Администратор создал для вас аккаунт врача. "
         f"Используйте данные ниже для входа в личный кабинет.</p>"
         f"<table style='margin:16px 0;width:100%;' cellpadding='8' cellspacing='0'>"
-        f"<tr><td style='color:#6b7280;'>Email:</td><td style='font-weight:bold;'>{email}</td></tr>"
-        f"<tr><td style='color:#6b7280;'>Пароль:</td><td style='font-weight:bold;'>{temp_password}</td></tr>"
+        f"<tr><td style='color:#6b7280;'>Email:</td><td style='font-weight:bold;'>{_esc(email)}</td></tr>"
+        f"<tr><td style='color:#6b7280;'>Пароль:</td><td style='font-weight:bold;'>{_esc(temp_password)}</td></tr>"
         f"</table>"
         f"<p style='color:#4b5563;'>Рекомендуем сменить пароль после первого входа.</p>"
         f"{_button(login_url, 'Войти в личный кабинет')}"
@@ -248,10 +264,10 @@ async def send_guest_account_created(
     html = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1f2937;'>Добро пожаловать!</h2>"
         f"<p style='color:#4b5563;line-height:1.6;'>Для участия в мероприятии "
-        f"«{event_title}» мы создали для вас аккаунт.</p>"
+        f"«{_esc(event_title)}» мы создали для вас аккаунт.</p>"
         f"<table style='margin:16px 0;width:100%;' cellpadding='8' cellspacing='0'>"
-        f"<tr><td style='color:#6b7280;'>Email:</td><td style='font-weight:bold;'>{email}</td></tr>"
-        f"<tr><td style='color:#6b7280;'>Пароль:</td><td style='font-weight:bold;'>{temp_password}</td></tr>"
+        f"<tr><td style='color:#6b7280;'>Email:</td><td style='font-weight:bold;'>{_esc(email)}</td></tr>"
+        f"<tr><td style='color:#6b7280;'>Пароль:</td><td style='font-weight:bold;'>{_esc(temp_password)}</td></tr>"
         f"</table>"
         f"<p style='color:#4b5563;'>Рекомендуем сменить пароль после первого входа.</p>"
         f"{_button(login_url, 'Войти в аккаунт')}"

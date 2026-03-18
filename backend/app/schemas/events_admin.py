@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.content_admin import ContentBlockNested
+from app.schemas.shared import ContentBlockNested
 
 # ── Request schemas ───────────────────────────────────────────────
 

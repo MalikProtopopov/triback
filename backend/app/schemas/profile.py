@@ -5,10 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
-
-class CityNested(BaseModel):
-    id: UUID
-    name: str
+from app.schemas.shared import CityNested
 
 
 class DocumentNested(BaseModel):

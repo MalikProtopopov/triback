@@ -6,26 +6,19 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.schemas.content_admin import ContentBlockNested
+from app.schemas.shared import (
+    CityNested,
+    ContentBlockNested,
+    PaymentNested,
+    SubscriptionNested,
+)
 
 # ── Nested helpers ────────────────────────────────────────────────
-
-class CityNested(BaseModel):
-    id: UUID
-    name: str
 
 
 class SpecializationNested(BaseModel):
     id: UUID
     name: str
-
-
-class SubscriptionNested(BaseModel):
-    id: UUID | None = None
-    status: str | None = None
-    plan_name: str | None = None
-    starts_at: datetime | None = None
-    ends_at: datetime | None = None
 
 
 class DocumentNested(BaseModel):
@@ -36,15 +29,6 @@ class DocumentNested(BaseModel):
     file_size: int
     mime_type: str
     uploaded_at: datetime
-
-
-class PaymentNested(BaseModel):
-    id: UUID
-    amount: float
-    product_type: str
-    status: str
-    paid_at: datetime | None = None
-    created_at: datetime
 
 
 class PendingDraftNested(BaseModel):

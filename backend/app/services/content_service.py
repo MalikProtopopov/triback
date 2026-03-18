@@ -1,4 +1,7 @@
-"""Admin service for articles, article themes, organization documents."""
+"""Admin service for content — articles, themes, org docs.
+
+Delegates org-doc operations to OrgDocAdminService.
+"""
 
 from __future__ import annotations
 
@@ -10,37 +13,35 @@ import structlog
 from fastapi import UploadFile
 from sqlalchemy import and_, delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import selectinload
 
+from app.core.enums import ArticleStatus
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.core.utils import generate_unique_slug
 from app.models.content import (
     Article,
     ArticleTheme,
     ArticleThemeAssignment,
-    ContentBlock,
-    OrganizationDocument,
 )
 from app.schemas.content_admin import (
     ArticleAdminDetailResponse,
     ArticleAdminListItem,
     ContentBlockNested,
     OrgDocDetailResponse,
-    OrgDocListItem,
     ThemeAdminResponse,
     ThemeNested,
 )
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
+from app.services.org_doc_admin_service import OrgDocAdminService
 
 logger = structlog.get_logger(__name__)
-
-DOCUMENT_MIMES = file_service.IMAGE_MIMES | {"application/pdf"}
 
 
 class ContentAdminService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self._org_docs = OrgDocAdminService(db)
 
     # ══ Articles ══════════════════════════════════════════════════
 
@@ -81,12 +82,8 @@ class ContentAdminService:
 
         items = [
             ArticleAdminListItem(
-                id=a.id,
-                slug=a.slug,
-                title=a.title,
-                excerpt=a.excerpt,
-                status=a.status,
-                author_id=a.author_id,
+                id=a.id, slug=a.slug, title=a.title, excerpt=a.excerpt,
+                status=a.status, author_id=a.author_id,
                 published_at=a.published_at,
                 cover_image_url=file_service.build_media_url(a.cover_image_url),
                 themes=[
@@ -105,32 +102,30 @@ class ContentAdminService:
         data: dict[str, Any],
         cover_image: UploadFile | None = None,
     ) -> ArticleAdminDetailResponse:
-        slug = data.pop("slug", None) or await generate_unique_slug(self.db, Article, data["title"])
+        slug = data.pop("slug", None) or await generate_unique_slug(
+            self.db, Article, data["title"]
+        )
 
         cover_url: str | None = None
         if cover_image:
             cover_url = await file_service.upload_file(
-                cover_image,
-                path="articles/covers",
-                allowed_types=file_service.IMAGE_MIMES,
-                max_size_mb=5,
+                cover_image, path="articles/covers",
+                allowed_types=file_service.IMAGE_MIMES, max_size_mb=5,
             )
 
         theme_ids: list[UUID] = data.pop("theme_ids", [])
 
         article = Article(
-            title=data["title"],
-            slug=slug,
-            content=data["content"],
+            title=data["title"], slug=slug, content=data["content"],
             excerpt=data.get("excerpt"),
-            status=data.get("status", "draft"),
+            status=data.get("status", ArticleStatus.DRAFT),
             author_id=admin_id,
             seo_title=data.get("seo_title"),
             seo_description=data.get("seo_description"),
             cover_image_url=cover_url,
         )
 
-        if article.status == "published" and article.published_at is None:
+        if article.status == ArticleStatus.PUBLISHED and article.published_at is None:
             article.published_at = datetime.now(UTC)
 
         self.db.add(article)
@@ -147,7 +142,7 @@ class ContentAdminService:
             select(Article)
             .execution_options(populate_existing=True)
             .options(
-                selectinload(Article.theme_assignments).joinedload(
+                selectinload(Article.theme_assignments).selectinload(
                     ArticleThemeAssignment.theme
                 )
             )
@@ -160,39 +155,28 @@ class ContentAdminService:
         blocks = await list_blocks_for_entity(self.db, "article", a.id)
         content_blocks = [
             ContentBlockNested(
-                id=b.id,
-                block_type=b.block_type,
-                sort_order=b.sort_order,
-                title=b.title,
-                content=b.content,
+                id=b.id, block_type=b.block_type, sort_order=b.sort_order,
+                title=b.title, content=b.content,
                 media_url=file_service.build_media_url(b.media_url),
                 thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                link_url=b.link_url,
-                link_label=b.link_label,
-                device_type=b.device_type,
-                block_metadata=b.block_metadata,
+                link_url=b.link_url, link_label=b.link_label,
+                device_type=b.device_type, block_metadata=b.block_metadata,
             )
             for b in blocks
         ]
 
         return ArticleAdminDetailResponse(
-            id=a.id,
-            slug=a.slug,
-            title=a.title,
-            content=a.content,
+            id=a.id, slug=a.slug, title=a.title, content=a.content,
             excerpt=a.excerpt,
             cover_image_url=file_service.build_media_url(a.cover_image_url),
-            status=a.status,
-            author_id=a.author_id,
+            status=a.status, author_id=a.author_id,
             published_at=a.published_at,
-            seo_title=a.seo_title,
-            seo_description=a.seo_description,
+            seo_title=a.seo_title, seo_description=a.seo_description,
             themes=[
                 ThemeNested(id=ta.theme.id, slug=ta.theme.slug, title=ta.theme.title)
                 for ta in a.theme_assignments
             ],
-            created_at=a.created_at,
-            updated_at=a.updated_at,
+            created_at=a.created_at, updated_at=a.updated_at,
             content_blocks=content_blocks,
         )
 
@@ -217,17 +201,15 @@ class ContentAdminService:
             if value is not None and hasattr(article, field):
                 setattr(article, field, value)
 
-        if article.status == "published" and article.published_at is None:
+        if article.status == ArticleStatus.PUBLISHED and article.published_at is None:
             article.published_at = datetime.now(UTC)
 
         if cover_image:
             if article.cover_image_url:
                 await file_service.delete_file(article.cover_image_url)
             article.cover_image_url = await file_service.upload_file(
-                cover_image,
-                path="articles/covers",
-                allowed_types=file_service.IMAGE_MIMES,
-                max_size_mb=5,
+                cover_image, path="articles/covers",
+                allowed_types=file_service.IMAGE_MIMES, max_size_mb=5,
             )
 
         if theme_ids is not None:
@@ -253,7 +235,7 @@ class ContentAdminService:
     # ══ Article Themes ════════════════════════════════════════════
 
     async def list_themes(
-        self, *, active: bool | None = None, has_articles: bool | None = None
+        self, *, active: bool | None = None, has_articles: bool | None = None,
     ) -> list[ThemeAdminResponse]:
         base = select(ArticleTheme)
 
@@ -270,7 +252,7 @@ class ContentAdminService:
                     .where(
                         and_(
                             ArticleThemeAssignment.theme_id == ArticleTheme.id,
-                            Article.status == "published",
+                            Article.status == ArticleStatus.PUBLISHED,
                         )
                     )
                 )
@@ -290,11 +272,8 @@ class ContentAdminService:
             ).scalar() or 0
             result.append(
                 ThemeAdminResponse(
-                    id=t.id,
-                    slug=t.slug,
-                    title=t.title,
-                    is_active=t.is_active,
-                    sort_order=t.sort_order,
+                    id=t.id, slug=t.slug, title=t.title,
+                    is_active=t.is_active, sort_order=t.sort_order,
                     articles_count=count,
                 )
             )
@@ -305,8 +284,7 @@ class ContentAdminService:
         if not slug:
             slug = await generate_unique_slug(self.db, ArticleTheme, data["title"])
         theme = ArticleTheme(
-            title=data["title"],
-            slug=slug,
+            title=data["title"], slug=slug,
             is_active=data.get("is_active", True),
             sort_order=data.get("sort_order", 0),
         )
@@ -314,16 +292,13 @@ class ContentAdminService:
         await self.db.commit()
         await self.db.refresh(theme)
         return ThemeAdminResponse(
-            id=theme.id,
-            slug=theme.slug,
-            title=theme.title,
-            is_active=theme.is_active,
-            sort_order=theme.sort_order,
+            id=theme.id, slug=theme.slug, title=theme.title,
+            is_active=theme.is_active, sort_order=theme.sort_order,
             articles_count=0,
         )
 
     async def update_theme(
-        self, theme_id: UUID, data: dict[str, Any]
+        self, theme_id: UUID, data: dict[str, Any],
     ) -> ThemeAdminResponse:
         theme = await self.db.get(ArticleTheme, theme_id)
         if not theme:
@@ -345,11 +320,8 @@ class ContentAdminService:
         ).scalar() or 0
 
         return ThemeAdminResponse(
-            id=theme.id,
-            slug=theme.slug,
-            title=theme.title,
-            is_active=theme.is_active,
-            sort_order=theme.sort_order,
+            id=theme.id, slug=theme.slug, title=theme.title,
+            is_active=theme.is_active, sort_order=theme.sort_order,
             articles_count=count,
         )
 
@@ -365,7 +337,7 @@ class ContentAdminService:
                 .where(
                     and_(
                         ArticleThemeAssignment.theme_id == theme_id,
-                        Article.status == "published",
+                        Article.status == ArticleStatus.PUBLISHED,
                     )
                 )
             )
@@ -379,164 +351,29 @@ class ContentAdminService:
         await self.db.delete(theme)
         await self.db.commit()
 
-    # ══ Organization Documents ════════════════════════════════════
+    # ══ Organization Documents (delegated) ════════════════════════
 
     async def list_org_docs(
-        self, *, limit: int = 20, offset: int = 0
+        self, *, limit: int = 20, offset: int = 0,
     ) -> dict[str, Any]:
-        count_q = select(func.count(OrganizationDocument.id))
-        total = (await self.db.execute(count_q)).scalar() or 0
-
-        base = (
-            select(OrganizationDocument)
-            .order_by(OrganizationDocument.sort_order, OrganizationDocument.title)
-            .offset(offset)
-            .limit(limit)
-        )
-        rows = (await self.db.execute(base)).scalars().all()
-
-        items = [
-            OrgDocListItem(
-                id=d.id,
-                title=d.title,
-                slug=d.slug,
-                content=d.content,
-                file_url=file_service.build_media_url(d.file_url),
-                sort_order=d.sort_order,
-                is_active=d.is_active,
-                updated_at=d.updated_at,
-            )
-            for d in rows
-        ]
-        return {"data": items, "total": total, "limit": limit, "offset": offset}
+        return await self._org_docs.list_docs(limit=limit, offset=offset)
 
     async def create_org_doc(
-        self,
-        admin_id: UUID,
-        data: dict[str, Any],
+        self, admin_id: UUID, data: dict[str, Any],
         file: UploadFile | None = None,
     ) -> OrgDocDetailResponse:
-        slug = data.pop("slug", None) or await generate_unique_slug(self.db, OrganizationDocument, data["title"])
-
-        file_url: str | None = None
-        if file:
-            file_url = await file_service.upload_file(
-                file,
-                path="organization-documents",
-                allowed_types=DOCUMENT_MIMES,
-                max_size_mb=20,
-            )
-
-        doc = OrganizationDocument(
-            title=data["title"],
-            slug=slug,
-            content=data.get("content"),
-            file_url=file_url,
-            sort_order=data.get("sort_order", 0),
-            is_active=data.get("is_active", True),
-            updated_by=admin_id,
-        )
-        self.db.add(doc)
-        await self.db.commit()
-        await self.db.refresh(doc)
-        return await self._org_doc_detail(doc)
+        return await self._org_docs.create(admin_id, data, file)
 
     async def update_org_doc(
-        self,
-        doc_id: UUID,
-        admin_id: UUID,
-        data: dict[str, Any],
-        file: UploadFile | None = None,
-        remove_file: bool = False,
+        self, doc_id: UUID, admin_id: UUID, data: dict[str, Any],
+        file: UploadFile | None = None, remove_file: bool = False,
     ) -> OrgDocDetailResponse:
-        doc = await self.db.get(OrganizationDocument, doc_id)
-        if not doc:
-            raise NotFoundError("Document not found")
-
-        for field, value in data.items():
-            if value is not None and hasattr(doc, field):
-                setattr(doc, field, value)
-
-        if remove_file and not file and doc.file_url:
-            await file_service.delete_file(doc.file_url)
-            doc.file_url = None
-        elif file:
-            if doc.file_url:
-                await file_service.delete_file(doc.file_url)
-            doc.file_url = await file_service.upload_file(
-                file,
-                path="organization-documents",
-                allowed_types=DOCUMENT_MIMES,
-                max_size_mb=20,
-            )
-
-        doc.updated_by = admin_id
-        await self.db.commit()
-        await self.db.refresh(doc)
-        return await self._org_doc_detail(doc)
+        return await self._org_docs.update(doc_id, admin_id, data, file, remove_file)
 
     async def delete_org_doc(self, doc_id: UUID) -> None:
-        doc = await self.db.get(OrganizationDocument, doc_id)
-        if not doc:
-            raise NotFoundError("Document not found")
-
-        if doc.file_url:
-            await file_service.delete_file(doc.file_url)
-
-        await self.db.delete(doc)
-        await self.db.commit()
+        return await self._org_docs.delete(doc_id)
 
     async def reorder_org_docs(
-        self, items: list[dict[str, Any]]
+        self, items: list[dict[str, Any]],
     ) -> list[OrgDocDetailResponse]:
-        result = []
-        for item in items:
-            doc = await self.db.get(OrganizationDocument, item["id"])
-            if not doc:
-                raise NotFoundError(f"Document {item['id']} not found")
-            doc.sort_order = item["sort_order"]
-            result.append(doc)
-        await self.db.commit()
-        return [
-            await self._org_doc_detail(d)
-            for d in sorted(result, key=lambda d: d.sort_order)
-        ]
-
-    async def _org_doc_detail(self, d: OrganizationDocument) -> OrgDocDetailResponse:
-        blocks_q = (
-            select(ContentBlock)
-            .where(
-                ContentBlock.entity_type == "organization_document",
-                ContentBlock.entity_id == d.id,
-            )
-            .order_by(ContentBlock.sort_order.asc())
-        )
-        blocks = (await self.db.execute(blocks_q)).scalars().all()
-        return OrgDocDetailResponse(
-            id=d.id,
-            title=d.title,
-            slug=d.slug,
-            content=d.content,
-            file_url=file_service.build_media_url(d.file_url),
-            sort_order=d.sort_order,
-            is_active=d.is_active,
-            updated_by=d.updated_by,
-            created_at=d.created_at,
-            updated_at=d.updated_at,
-            content_blocks=[
-                ContentBlockNested(
-                    id=b.id,
-                    block_type=b.block_type,
-                    sort_order=b.sort_order,
-                    title=b.title,
-                    content=b.content,
-                    media_url=file_service.build_media_url(b.media_url),
-                    thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                    link_url=b.link_url,
-                    link_label=b.link_label,
-                    device_type=b.device_type,
-                    block_metadata=b.block_metadata,
-                )
-                for b in blocks
-            ],
-        )
+        return await self._org_docs.reorder(items)

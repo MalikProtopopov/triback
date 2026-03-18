@@ -7,6 +7,7 @@ from fastapi import UploadFile
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.enums import DoctorStatus
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.utils import generate_unique_slug
 from app.models.profiles import DoctorDocument, DoctorProfile, ModerationHistory
@@ -69,7 +70,7 @@ class OnboardingService:
                 docs = doc_result.scalars().all()
                 documents_uploaded = len(docs) > 0
 
-                if moderation_status == "rejected":
+                if moderation_status == DoctorStatus.REJECTED:
                     mh_result = await self.db.execute(
                         select(ModerationHistory.comment)
                         .where(
@@ -130,11 +131,11 @@ class OnboardingService:
             return "upload_documents"
         if not is_submitted:
             return "submit"
-        if moderation_status == "pending_review":
+        if moderation_status == DoctorStatus.PENDING_REVIEW:
             return "await_moderation"
-        if moderation_status in ("approved", "active"):
+        if moderation_status in (DoctorStatus.APPROVED, DoctorStatus.ACTIVE):
             return "completed"
-        if moderation_status == "rejected":
+        if moderation_status == DoctorStatus.REJECTED:
             return "fill_profile"
         return "submit"
 
@@ -172,7 +173,7 @@ class OnboardingService:
                 first_name="",
                 last_name="",
                 phone="",
-                status="pending_review",
+                status=DoctorStatus.PENDING_REVIEW,
                 slug=slug,
             )
             self.db.add(profile)
@@ -191,7 +192,7 @@ class OnboardingService:
             "message": message,
             "next_step": next_step,
             "profile_id": str(profile_id) if profile_id else None,
-            "moderation_status": "pending_review" if role == "doctor" else None,
+            "moderation_status": DoctorStatus.PENDING_REVIEW if role == "doctor" else None,
         }
 
     async def update_doctor_profile(self, user_id: UUID, data: dict) -> dict:
@@ -274,7 +275,7 @@ class OnboardingService:
         if not profile:
             raise NotFoundError("Doctor profile not found")
 
-        if profile.status not in ("pending_review", "rejected"):
+        if profile.status not in (DoctorStatus.PENDING_REVIEW, DoctorStatus.REJECTED):
             raise ConflictError("Заявка уже одобрена или находится на проверке")
 
         if not profile.first_name or not profile.last_name or not profile.phone:
@@ -288,7 +289,7 @@ class OnboardingService:
                 "о высшем медицинском образовании"
             )
 
-        profile.status = "pending_review"
+        profile.status = DoctorStatus.PENDING_REVIEW
         profile.onboarding_submitted_at = datetime.now(tz=UTC)
         await self.db.commit()
 
@@ -296,5 +297,5 @@ class OnboardingService:
             "message": "Заявка отправлена на модерацию. Мы уведомим вас о результате",
             "next_step": "await_moderation",
             "profile_id": str(profile.id),
-            "moderation_status": "pending_review",
+            "moderation_status": DoctorStatus.PENDING_REVIEW,
         }

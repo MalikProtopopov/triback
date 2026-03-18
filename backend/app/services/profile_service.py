@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.enums import ChangeStatus
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.profiles import DoctorProfile, DoctorProfileChange
 from app.services import file_service
@@ -83,7 +84,7 @@ class ProfileService:
             select(DoctorProfileChange)
             .where(
                 DoctorProfileChange.doctor_profile_id == profile.id,
-                DoctorProfileChange.status == "pending",
+                DoctorProfileChange.status == ChangeStatus.PENDING,
             )
         )
         draft = draft_result.scalar_one_or_none()
@@ -101,7 +102,7 @@ class ProfileService:
                 .limit(1)
             )
             latest = latest_result.scalar_one_or_none()
-            if latest and latest.status in ("rejected", "approved"):
+            if latest and latest.status in (ChangeStatus.REJECTED, ChangeStatus.APPROVED):
                 draft = latest
 
         city_data = None
@@ -158,7 +159,7 @@ class ProfileService:
             doctor_profile_id=profile.id,
             changes=changes,
             changed_fields=list(changes.keys()),
-            status="pending",
+            status=ChangeStatus.PENDING,
             moderation_comment=moderation_comment,
         )
         self.db.add(change)
@@ -191,7 +192,7 @@ class ProfileService:
             select(DoctorProfileChange).where(
                 and_(
                     DoctorProfileChange.doctor_profile_id == profile.id,
-                    DoctorProfileChange.status == "pending",
+                    DoctorProfileChange.status == ChangeStatus.PENDING,
                 )
             )
         )
@@ -210,7 +211,7 @@ class ProfileService:
                 doctor_profile_id=profile.id,
                 changes={"photo_url": main_key},
                 changed_fields=["photo_url"],
-                status="pending",
+                status=ChangeStatus.PENDING,
             )
             self.db.add(draft)
 

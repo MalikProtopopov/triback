@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.enums import DoctorStatus, VotingSessionStatus
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.pagination import PaginatedResponse
 from app.models.profiles import DoctorProfile
@@ -21,8 +22,8 @@ from app.services import file_service
 logger = structlog.get_logger(__name__)
 
 _VALID_STATUS_TRANSITIONS = {
-    "draft": {"active", "cancelled"},
-    "active": {"closed", "cancelled"},
+    VotingSessionStatus.DRAFT: {VotingSessionStatus.ACTIVE, VotingSessionStatus.CANCELLED},
+    VotingSessionStatus.ACTIVE: {VotingSessionStatus.CLOSED, VotingSessionStatus.CANCELLED},
 }
 
 
@@ -40,7 +41,7 @@ class VotingService:
             select(VotingSession)
             .options(selectinload(VotingSession.candidates))
             .where(
-                VotingSession.status == "active",
+                VotingSession.status == VotingSessionStatus.ACTIVE,
                 VotingSession.starts_at <= now,
                 VotingSession.ends_at > now,
             )
@@ -298,7 +299,7 @@ class VotingService:
         total_eligible = (
             await self.db.execute(
                 select(func.count(DoctorProfile.id)).where(
-                    DoctorProfile.status == "active"
+                    DoctorProfile.status == DoctorStatus.ACTIVE
                 )
             )
         ).scalar() or 0
