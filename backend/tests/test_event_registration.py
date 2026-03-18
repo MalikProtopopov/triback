@@ -8,6 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.users import User
+from app.services.payment_providers.base import CreatePaymentResult
 
 # ── Scenario 1: Authenticated user -> direct payment ──────────────
 
@@ -25,17 +26,16 @@ async def test_register_for_event_authenticated(
     tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
     await db_session.commit()
 
-    mock_resp = {
-        "id": "yoo_evt_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/evt"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_evt_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/evt",
+    )
 
-    with patch(
-        "app.services.event_registration_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_resp,
-    ):
+    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
         resp = await client.post(
             f"/api/v1/events/{event.id}/register",
             headers=auth_headers_doctor,
@@ -71,17 +71,16 @@ async def test_register_member_gets_discount(
     await create_subscription(db_session, user=doctor_user, plan=plan, status="active")
     await db_session.commit()
 
-    mock_resp = {
-        "id": "yoo_mbr_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/mbr"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_mbr_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/mbr",
+    )
 
-    with patch(
-        "app.services.event_registration_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_resp,
-    ):
+    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
         resp = await client.post(
             f"/api/v1/events/{event.id}/register",
             headers=auth_headers_doctor,
@@ -216,22 +215,20 @@ async def test_confirm_guest_registration_success(
         }),
     )
 
-    mock_resp = {
-        "id": "yoo_confirm_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/confirm"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_confirm_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/confirm",
+    )
 
     with (
-        patch(
-            "app.services.event_registration_service.YooKassaClient.create_payment",
-            new_callable=AsyncMock,
-            return_value=mock_resp,
-        ),
+        patch("app.services.event_registration_service.get_provider") as mock_gp,
         patch(
             "app.tasks.email_tasks.send_guest_account_created",
         ) as mock_email,
     ):
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
         mock_email.kiq = AsyncMock()
         resp = await client.post(
             f"/api/v1/events/{event.id}/confirm-guest-registration",
@@ -246,7 +243,7 @@ async def test_confirm_guest_registration_success(
     assert resp.status_code == 201
     data = resp.json()
     assert data["registration_id"] is not None
-    assert data["payment_url"] == "https://yookassa.ru/pay/confirm"
+    assert data["payment_url"] == "https://moneta.test/pay/confirm"
     assert data["applied_price"] == 2000.0
     assert data["is_member_price"] is False
 

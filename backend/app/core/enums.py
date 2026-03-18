@@ -82,3 +82,15 @@ class ProductType(StrEnum):
     ENTRY_FEE = "entry_fee"
     SUBSCRIPTION = "subscription"
     EVENT = "event"
+
+
+class PaymentProviderEnum(StrEnum):
+    YOOKASSA = "yookassa"
+    PSB = "psb"
+    MANUAL = "manual"
+    MONETA = "moneta"
+
+
+class PlanType(StrEnum):
+    ENTRY_FEE = "entry_fee"
+    SUBSCRIPTION = "subscription"

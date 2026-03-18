@@ -33,22 +33,19 @@ from app.schemas.subscriptions import (
     SubscriptionStatusResponse,
 )
 from app.services.payment_admin_service import PaymentAdminService
-from app.services.payment_service import YooKassaClient
+from app.services.payment_providers import PaymentItem, get_provider
 from app.services.payment_user_service import PaymentUserService
-from app.services.payment_utils import LAPSE_THRESHOLD_DAYS, build_receipt
+from app.services.payment_utils import LAPSE_THRESHOLD_DAYS
 from app.services.payment_webhook_service import PaymentWebhookService
 
 logger = structlog.get_logger(__name__)
-
-# Re-export for backward-compat (event_registration_service imports this)
-_build_receipt = build_receipt
 
 
 class SubscriptionService:
     def __init__(self, db: AsyncSession, redis: Redis) -> None:  # type: ignore[type-arg]
         self.db = db
         self.redis = redis
-        self.yookassa = YooKassaClient()
+        self.provider = get_provider()
         self._webhook = PaymentWebhookService(db)
         self._admin = PaymentAdminService(db)
         self._user = PaymentUserService(db)
@@ -62,8 +59,8 @@ class SubscriptionService:
             data = json.loads(cached)
             return PayResponse(**data)
 
-        plan = await self.db.get(Plan, plan_id)
-        if not plan or not plan.is_active:
+        sub_plan = await self.db.get(Plan, plan_id)
+        if not sub_plan or not sub_plan.is_active:
             raise NotFoundError("Plan not found or inactive")
 
         dp_result = await self.db.execute(
@@ -79,9 +76,32 @@ class SubscriptionService:
 
         product_type = await self._determine_product_type(user_id)
 
+        # Build payment items depending on product_type
+        if product_type == ProductType.ENTRY_FEE:
+            entry_result = await self.db.execute(
+                select(Plan).where(
+                    Plan.plan_type == "entry_fee",
+                    Plan.is_active.is_(True),
+                ).limit(1)
+            )
+            entry_plan = entry_result.scalar_one_or_none()
+            if not entry_plan:
+                raise AppValidationError("Вступительный взнос не настроен")
+
+            total_amount = Decimal(str(entry_plan.price)) + Decimal(str(sub_plan.price))
+            items = [
+                PaymentItem(name=entry_plan.name, price=Decimal(str(entry_plan.price))),
+                PaymentItem(name=sub_plan.name, price=Decimal(str(sub_plan.price))),
+            ]
+            description = f"{entry_plan.name} + {sub_plan.name} — Ассоциация трихологов"
+        else:
+            total_amount = Decimal(str(sub_plan.price))
+            items = [PaymentItem(name=sub_plan.name, price=Decimal(str(sub_plan.price)))]
+            description = f"{sub_plan.name} — Ассоциация трихологов"
+
         sub = Subscription(
             user_id=user_id,
-            plan_id=plan.id,
+            plan_id=sub_plan.id,
             status=SubscriptionStatus.PENDING_PAYMENT,
             is_first_year=product_type == ProductType.ENTRY_FEE,
         )
@@ -90,46 +110,41 @@ class SubscriptionService:
 
         payment = Payment(
             user_id=user_id,
-            amount=plan.price,
+            amount=float(total_amount),
             product_type=product_type,
-            payment_provider="yookassa",
+            payment_provider=settings.PAYMENT_PROVIDER,
             status=PaymentStatus.PENDING,
             subscription_id=sub.id,
             idempotency_key=idempotency_key,
-            description=f"{plan.name} — Ассоциация трихологов",
+            description=description,
         )
         self.db.add(payment)
         await self.db.flush()
-
-        return_url = f"{settings.YOOKASSA_RETURN_URL}?payment_id={payment.id}"
 
         from app.models.users import User
 
         user_row = await self.db.execute(select(User.email).where(User.id == user_id))
         user_email = user_row.scalar_one_or_none() or ""
 
-        receipt = build_receipt(
-            email=user_email,
-            description=payment.description or plan.name,
-            amount=Decimal(str(plan.price)),
-        )
-
-        yookassa_resp = await self.yookassa.create_payment(
-            amount=Decimal(str(plan.price)),
-            description=payment.description or "",
-            metadata={
-                "internal_payment_id": str(payment.id),
-                "product_type": product_type,
-                "user_id": str(user_id),
-            },
-            idempotency_key=idempotency_key,
+        if settings.PAYMENT_PROVIDER == "moneta":
+            return_url = settings.MONETA_RETURN_URL or settings.MONETA_SUCCESS_URL
+        else:
+            return_url = settings.YOOKASSA_RETURN_URL
+        result = await self.provider.create_payment(
+            transaction_id=str(payment.id),
+            items=items,
+            total_amount=total_amount,
+            description=description,
+            customer_email=user_email,
             return_url=return_url,
-            receipt=receipt,
+            idempotency_key=idempotency_key,
+            metadata={"product_type": product_type, "user_id": str(user_id)},
         )
 
-        payment.external_payment_id = yookassa_resp.get("id")
-        confirmation = yookassa_resp.get("confirmation", {})
-        payment.external_payment_url = confirmation.get("confirmation_url")
+        payment.external_payment_id = result.external_id
+        payment.external_payment_url = result.payment_url
+        if settings.PAYMENT_PROVIDER == "moneta":
+            payment.moneta_operation_id = result.external_id
 
         try:
             await self.db.commit()
@@ -154,7 +169,7 @@ class SubscriptionService:
         resp = PayResponse(
             payment_id=payment.id,
             payment_url=payment.external_payment_url or "",
-            amount=float(plan.price),
+            amount=float(total_amount),
         )
 
         ttl = getattr(settings, "PAYMENT_IDEMPOTENCY_TTL", 86400)
@@ -215,13 +230,56 @@ class SubscriptionService:
         latest = result.scalar_one_or_none()
 
         has_entry = await self._has_paid_entry_fee(user_id)
+        entry_fee_required = not has_entry
+
+        # Determine if lapsed subscription also needs entry_fee
+        if has_entry and latest and latest.ends_at:
+            now = datetime.now(UTC)
+            if latest.ends_at.tzinfo is None:
+                lapse = now.replace(tzinfo=None) - latest.ends_at
+            else:
+                lapse = now - latest.ends_at
+            if lapse > timedelta(days=LAPSE_THRESHOLD_DAYS):
+                entry_fee_required = True
+
+        # Fetch entry_fee plan
+        entry_fee_plan = None
+        if entry_fee_required:
+            ef_result = await self.db.execute(
+                select(Plan).where(Plan.plan_type == "entry_fee", Plan.is_active.is_(True)).limit(1)
+            )
+            ef = ef_result.scalar_one_or_none()
+            if ef:
+                entry_fee_plan = PlanNested(
+                    id=ef.id, code=ef.code, name=ef.name,
+                    plan_type=ef.plan_type, price=float(ef.price),
+                    duration_months=ef.duration_months,
+                )
+
+        # Fetch subscription plans
+        plans_result = await self.db.execute(
+            select(Plan).where(
+                Plan.plan_type == "subscription", Plan.is_active.is_(True)
+            ).order_by(Plan.sort_order)
+        )
+        available_plans = [
+            PlanNested(
+                id=p.id, code=p.code, name=p.name,
+                plan_type=p.plan_type, price=float(p.price),
+                duration_months=p.duration_months,
+            )
+            for p in plans_result.scalars().all()
+        ]
 
         if not latest:
             return SubscriptionStatusResponse(
                 has_subscription=False,
                 has_paid_entry_fee=has_entry,
                 can_renew=False,
-                next_action="pay_entry_fee" if not has_entry else "pay_subscription",
+                next_action="pay_entry_fee_and_subscription" if entry_fee_required else "pay_subscription",
+                entry_fee_required=entry_fee_required,
+                entry_fee_plan=entry_fee_plan,
+                available_plans=available_plans,
             )
 
         now = datetime.now(UTC)
@@ -233,7 +291,12 @@ class SubscriptionService:
             days_remaining = max(0, (latest.ends_at - now).days) if latest.ends_at.tzinfo else max(0, (latest.ends_at - now.replace(tzinfo=None)).days)
             current = CurrentSubscriptionNested(
                 id=latest.id,
-                plan=PlanNested(code=latest.plan.code, name=latest.plan.name),
+                plan=PlanNested(
+                    id=latest.plan.id, code=latest.plan.code, name=latest.plan.name,
+                    plan_type=getattr(latest.plan, "plan_type", "subscription"),
+                    price=float(latest.plan.price),
+                    duration_months=latest.plan.duration_months,
+                ),
                 status=latest.status,
                 starts_at=latest.starts_at,
                 ends_at=latest.ends_at,
@@ -252,6 +315,9 @@ class SubscriptionService:
             has_paid_entry_fee=has_entry,
             can_renew=can_renew,
             next_action=next_action,
+            entry_fee_required=entry_fee_required,
+            entry_fee_plan=entry_fee_plan,
+            available_plans=available_plans,
         )
 
     # ── Delegated methods (preserve original API) ─────────────────

@@ -1,15 +1,24 @@
-"""Webhook endpoints — YooKassa payment notifications."""
+"""Webhook endpoints — YooKassa & Moneta payment notifications."""
+
+from __future__ import annotations
+
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
+from app.core.enums import PaymentStatus
 from app.core.exceptions import ForbiddenError
 from app.core.redis import get_redis
+from app.models.subscriptions import Payment, Receipt
 from app.schemas.payments import WebhookPayload
+from app.services.payment_providers.moneta_client import MonetaPaymentProvider
+from app.services.payment_webhook_service import PaymentWebhookService
 from app.services.subscription_service import SubscriptionService
 
 logger = structlog.get_logger(__name__)
@@ -17,6 +26,11 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/webhooks")
 
 _DEDUP_TTL = 86400
+
+
+# ------------------------------------------------------------------
+# YooKassa webhook (legacy)
+# ------------------------------------------------------------------
 
 
 @router.post(
@@ -34,10 +48,7 @@ async def yookassa_webhook(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> JSONResponse:
-    """Принимает уведомления от YooKassa о статусе платежей.
-    Идемпотентность обеспечивается через Redis (dedup key с TTL 24ч).
-    Не вызывать напрямую — только для YooKassa.
-    """
+    """YooKassa payment status notifications (kept for backward compat)."""
     forwarded = request.headers.get("x-forwarded-for")
     client_ip = forwarded.split(",")[0].strip() if forwarded else ""
     if not client_ip and request.client:
@@ -64,5 +75,214 @@ async def yookassa_webhook(
         if external_id:
             await redis.delete(dedup_key)
         return JSONResponse(status_code=500, content={"status": "error"})
+
+    return JSONResponse(content={"status": "ok"})
+
+
+# ------------------------------------------------------------------
+# Moneta — Pay URL (payment notification)
+# ------------------------------------------------------------------
+
+async def _collect_moneta_params(request: Request) -> dict[str, str]:
+    """Merge GET query params and POST form-data into a single dict."""
+    params: dict[str, str] = dict(request.query_params)
+    if request.method == "POST":
+        content_type = request.headers.get("content-type", "")
+        if "form" in content_type:
+            form = await request.form()
+            params.update({k: str(v) for k, v in form.items()})
+    return params
+
+
+@router.api_route(
+    "/moneta",
+    methods=["GET", "POST"],
+    summary="Moneta Pay URL webhook",
+)
+async def moneta_pay_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> PlainTextResponse:
+    """Moneta Pay URL — вызывается Moneta после успешной оплаты.
+
+    Принимает GET или POST с параметрами `MNT_ID`, `MNT_TRANSACTION_ID`,
+    `MNT_OPERATION_ID`, `MNT_AMOUNT`, `MNT_SIGNATURE` и др.
+    Верифицирует подпись MD5, активирует подписку или регистрацию.
+    Возвращает `SUCCESS` или `FAIL` (plain text).
+    """
+    params = await _collect_moneta_params(request)
+    mnt_operation_id = params.get("MNT_OPERATION_ID", "")
+
+    dedup_key = f"webhook:dedup:moneta:{mnt_operation_id}"
+    if mnt_operation_id:
+        is_new = await redis.set(dedup_key, "1", ex=_DEDUP_TTL, nx=True)
+        if not is_new:
+            return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
+
+    provider = MonetaPaymentProvider()
+    try:
+        webhook_data = await provider.verify_webhook(params)
+    except ValueError:
+        logger.warning("moneta_signature_invalid", params=params)
+        return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+
+    try:
+        payment_id = UUID(webhook_data.transaction_id)
+        result = await db.execute(
+            select(Payment).where(Payment.id == payment_id).with_for_update()
+        )
+        payment = result.scalar_one_or_none()
+        if not payment:
+            logger.warning("moneta_payment_not_found", transaction_id=webhook_data.transaction_id)
+            if mnt_operation_id:
+                await redis.delete(dedup_key)
+            return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+
+        payment.moneta_operation_id = webhook_data.external_id
+
+        svc = PaymentWebhookService(db)
+        await svc.handle_moneta_payment_succeeded(payment)
+    except Exception:
+        logger.exception("moneta_webhook_processing_error")
+        if mnt_operation_id:
+            await redis.delete(dedup_key)
+        return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+
+    return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
+
+
+# ------------------------------------------------------------------
+# Moneta — Check URL (pre-payment validation)
+# ------------------------------------------------------------------
+
+
+@router.api_route(
+    "/moneta/check",
+    methods=["GET", "POST"],
+    summary="Moneta Check URL",
+)
+async def moneta_check_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Moneta Check URL — предварительная проверка заказа перед оплатой.
+
+    Moneta отправляет запрос для валидации: существует ли платёж, корректна ли
+    сумма. Возвращает XML-ответ с кодом `200` (OK), `402` (не найден) или `500`
+    (ошибка подписи).
+    """
+    params = await _collect_moneta_params(request)
+    mnt_id = params.get("MNT_ID", "")
+    mnt_transaction_id = params.get("MNT_TRANSACTION_ID", "")
+
+    provider = MonetaPaymentProvider()
+
+    try:
+        await provider.verify_webhook(params)
+    except ValueError:
+        logger.warning("moneta_check_signature_invalid", params=params)
+        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "500")
+        return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+    try:
+        payment_id = UUID(mnt_transaction_id)
+        result = await db.execute(select(Payment).where(Payment.id == payment_id))
+        payment = result.scalar_one_or_none()
+    except (ValueError, Exception):
+        payment = None
+
+    if payment and payment.status == PaymentStatus.PENDING:
+        xml = provider.build_check_response(
+            mnt_id, mnt_transaction_id, "200", amount=str(payment.amount)
+        )
+    else:
+        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "402")
+
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+# ------------------------------------------------------------------
+# Moneta — BPA receipt webhook
+# ------------------------------------------------------------------
+
+
+@router.post(
+    "/moneta/receipt",
+    summary="Moneta BPA receipt webhook",
+)
+async def moneta_receipt_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> JSONResponse:
+    """BPA PayAnyWay receipt webhook — фискальный чек.
+
+    Вызывается после формирования чека (54-ФЗ). Содержит JSON с `operation`
+    (ID операции Moneta) и `receipt` (URL чека). Сохраняет `Receipt` в БД
+    и отправляет email пользователю со ссылкой на скачивание чека.
+    """
+    # TODO: add IP whitelist or shared-secret auth when Moneta provides IP ranges
+    forwarded = request.headers.get("x-forwarded-for")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+    if not client_ip and request.client:
+        client_ip = request.client.host
+
+    body = await request.json()
+    logger.info("moneta_receipt_webhook", body=body, client_ip=client_ip)
+
+    operation = body.get("operation")
+    receipt_url = body.get("receipt")
+
+    if not operation or operation is False:
+        return JSONResponse(content={"status": "ok"})
+
+    operation_str = str(operation)
+    result = await db.execute(
+        select(Payment).where(Payment.moneta_operation_id == operation_str)
+    )
+    payment = result.scalar_one_or_none()
+    if not payment:
+        logger.warning("moneta_receipt_payment_not_found", operation=operation_str)
+        return JSONResponse(content={"status": "ok"})
+
+    receipt_type = "refund" if body.get("parentid") else "payment"
+
+    existing = await db.execute(
+        select(Receipt).where(
+            Receipt.payment_id == payment.id,
+            Receipt.receipt_type == receipt_type,
+        )
+    )
+    receipt = existing.scalar_one_or_none()
+    if receipt:
+        if receipt_url and receipt_url is not False:
+            receipt.receipt_url = str(receipt_url)
+            receipt.status = "succeeded"  # type: ignore[assignment]
+    else:
+        receipt = Receipt(
+            payment_id=payment.id,
+            receipt_type=receipt_type,
+            receipt_url=str(receipt_url) if receipt_url and receipt_url is not False else None,
+            amount=payment.amount,
+            status="succeeded",
+        )
+        db.add(receipt)
+
+    await db.commit()
+
+    final_receipt_url = str(receipt_url) if receipt_url and receipt_url is not False else None
+    if final_receipt_url:
+        from app.models.users import User
+
+        email_result = await db.execute(
+            select(User.email).where(User.id == payment.user_id)
+        )
+        user_email = email_result.scalar_one_or_none()
+        if user_email:
+            from app.tasks.email_tasks import send_receipt_available_notification
+
+            await send_receipt_available_notification.kiq(
+                user_email, final_receipt_url, float(payment.amount)
+            )
 
     return JSONResponse(content={"status": "ok"})

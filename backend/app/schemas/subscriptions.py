@@ -10,6 +10,13 @@ class PayRequest(BaseModel):
     plan_id: UUID
     idempotency_key: str
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "plan_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            "idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
+        }
+    })
+
 
 class PayResponse(BaseModel):
     payment_id: UUID
@@ -20,7 +27,7 @@ class PayResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "payment_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-            "payment_url": "https://yookassa.ru/payments/...",
+            "payment_url": "https://moneta.ru/assistant.htm?operationId=...",
             "amount": 15000.0,
             "expires_at": "2026-04-01T12:00:00Z",
         }
@@ -28,8 +35,12 @@ class PayResponse(BaseModel):
 
 
 class PlanNested(BaseModel):
+    id: UUID | None = None
     code: str
     name: str
+    plan_type: str = "subscription"
+    price: float = 0
+    duration_months: int = 12
 
 
 class CurrentSubscriptionNested(BaseModel):
@@ -50,6 +61,18 @@ class UserPaymentListItem(BaseModel):
     paid_at: datetime | None = None
     created_at: datetime
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+            "amount": 20000.0,
+            "product_type": "entry_fee",
+            "status": "succeeded",
+            "description": "Вступительный взнос + Годовой взнос — Ассоциация трихологов",
+            "paid_at": "2026-01-15T14:30:00Z",
+            "created_at": "2026-01-15T14:25:00Z",
+        }
+    })
+
 
 class ReceiptResponse(BaseModel):
     id: UUID
@@ -62,6 +85,20 @@ class ReceiptResponse(BaseModel):
     amount: float
     status: str
 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": "d4e5f6a7-b8c9-0123-def0-123456789abc",
+            "receipt_type": "payment",
+            "provider_receipt_id": "12345",
+            "receipt_url": "https://receipt.moneta.ru/receipt/12345",
+            "fiscal_number": "FN9876543210",
+            "fiscal_document": "FD12345",
+            "fiscal_sign": "FS987654321",
+            "amount": 20000.0,
+            "status": "succeeded",
+        }
+    })
+
 
 class SubscriptionStatusResponse(BaseModel):
     has_subscription: bool
@@ -69,13 +106,23 @@ class SubscriptionStatusResponse(BaseModel):
     has_paid_entry_fee: bool
     can_renew: bool
     next_action: str | None = None
+    entry_fee_required: bool = False
+    entry_fee_plan: PlanNested | None = None
+    available_plans: list[PlanNested] = []
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "has_subscription": True,
             "current_subscription": {
                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                "plan": {"code": "annual", "name": "Годовой взнос"},
+                "plan": {
+                    "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                    "code": "annual",
+                    "name": "Годовой взнос",
+                    "plan_type": "subscription",
+                    "price": 15000.0,
+                    "duration_months": 12,
+                },
                 "status": "active",
                 "starts_at": "2026-01-01T00:00:00Z",
                 "ends_at": "2027-01-01T00:00:00Z",
@@ -84,6 +131,9 @@ class SubscriptionStatusResponse(BaseModel):
             "has_paid_entry_fee": True,
             "can_renew": False,
             "next_action": None,
+            "entry_fee_required": False,
+            "entry_fee_plan": None,
+            "available_plans": [],
         }
     })
 

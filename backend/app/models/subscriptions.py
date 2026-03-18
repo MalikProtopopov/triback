@@ -35,8 +35,9 @@ class Plan(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "plans"
     __table_args__ = (
         CheckConstraint("price > 0", name="chk_plans_price"),
-        CheckConstraint("duration_months > 0", name="chk_plans_duration"),
+        CheckConstraint("duration_months >= 0", name="chk_plans_duration"),
         Index("idx_plans_active", "is_active"),
+        Index("idx_plans_plan_type", "plan_type"),
     )
 
     code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
@@ -46,6 +47,9 @@ class Plan(Base, UUIDMixin, TimestampMixin):
     duration_months: Mapped[int] = mapped_column(Integer, server_default="12", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    plan_type: Mapped[str] = mapped_column(
+        String(20), server_default="subscription", nullable=False
+    )
 
     subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="plan")
 
@@ -102,6 +106,11 @@ class Payment(Base, UUIDMixin, TimestampMixin):
         Index("idx_payments_subscription", "subscription_id"),
         Index("idx_payments_event_reg", "event_registration_id"),
         Index("idx_payments_created_at", "created_at"),
+        Index(
+            "idx_payments_moneta_op",
+            "moneta_operation_id",
+            postgresql_where="moneta_operation_id IS NOT NULL",
+        ),
     )
 
     user_id: Mapped[UUID] = mapped_column(
@@ -126,6 +135,7 @@ class Payment(Base, UUIDMixin, TimestampMixin):
     idempotency_key: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(500))
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    moneta_operation_id: Mapped[str | None] = mapped_column(String(255))
 
     subscription: Mapped["Subscription | None"] = relationship(back_populates="payments")
     receipts: Mapped[list["Receipt"]] = relationship(back_populates="payment")

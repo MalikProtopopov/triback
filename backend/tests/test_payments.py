@@ -7,6 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.users import User
+from app.services.payment_providers.base import CreatePaymentResult
 
 
 async def test_pay_creates_payment(
@@ -15,25 +16,28 @@ async def test_pay_creates_payment(
     doctor_user: User,
     db_session: AsyncSession,
 ):
+    from app.models.subscriptions import Plan
+
     from tests.factories import create_doctor_profile, create_plan
 
     await create_doctor_profile(
         db_session, user=doctor_user, status="active", has_medical_diploma=True
     )
+    entry_plan = Plan(code="entry_fee", name="Членский взнос", price=5000.0, duration_months=0, is_active=True, plan_type="entry_fee")
+    db_session.add(entry_plan)
     plan = await create_plan(db_session)
     await db_session.commit()
 
-    mock_yookassa_resp = {
-        "id": "yoo_" + uuid4().hex[:10],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/test"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_" + uuid4().hex[:10],
+        payment_url="https://moneta.test/pay/test",
+    )
 
-    with patch(
-        "app.services.subscription_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_yookassa_resp,
-    ):
+    with patch("app.services.subscription_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
         resp = await client.post(
             "/api/v1/subscriptions/pay",
             headers=auth_headers_doctor,
@@ -56,27 +60,30 @@ async def test_pay_idempotency(
     db_session: AsyncSession,
     redis_mock: AsyncMock,
 ):
+    from app.models.subscriptions import Plan
+
     from tests.factories import create_doctor_profile, create_plan
 
     await create_doctor_profile(
         db_session, user=doctor_user, status="active", has_medical_diploma=True
     )
+    entry_plan = Plan(code="entry_fee_idem", name="Членский взнос", price=5000.0, duration_months=0, is_active=True, plan_type="entry_fee")
+    db_session.add(entry_plan)
     plan = await create_plan(db_session)
     await db_session.commit()
 
     idem_key = uuid4().hex
 
-    mock_yookassa_resp = {
-        "id": "yoo_idem_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/idem"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_idem_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/idem",
+    )
 
-    with patch(
-        "app.services.subscription_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_yookassa_resp,
-    ):
+    with patch("app.services.subscription_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
         resp1 = await client.post(
             "/api/v1/subscriptions/pay",
             headers=auth_headers_doctor,
@@ -158,9 +165,7 @@ async def test_webhook_ip_not_whitelisted(client: AsyncClient):
         },
         headers={"x-forwarded-for": "1.2.3.4"},
     )
-    # The webhook endpoint catches all exceptions and returns 200
-    # but internally the ForbiddenError is raised and logged
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
 async def test_webhook_already_succeeded(

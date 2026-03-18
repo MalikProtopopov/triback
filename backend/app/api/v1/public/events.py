@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -157,6 +157,10 @@ async def list_event_galleries(
             select(Subscription.id).where(
                 Subscription.user_id == user_id,
                 Subscription.status == SubscriptionStatus.ACTIVE,
+                or_(
+                    Subscription.ends_at.is_(None),
+                    Subscription.ends_at > func.now(),
+                ),
             ).limit(1)
         )).scalar_one_or_none()
         reg = (await db.execute(
@@ -229,6 +233,10 @@ async def list_event_recordings(
             select(Subscription.id).where(
                 Subscription.user_id == user_id,
                 Subscription.status == SubscriptionStatus.ACTIVE,
+                or_(
+                    Subscription.ends_at.is_(None),
+                    Subscription.ends_at > func.now(),
+                ),
             ).limit(1)
         )).scalar_one_or_none()
         reg = (await db.execute(

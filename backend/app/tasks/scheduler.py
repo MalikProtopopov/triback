@@ -1,5 +1,11 @@
-"""Scheduled / cron-style tasks — subscription reminders and expiry."""
+"""Scheduled / cron-style tasks — subscription reminders and expiry.
 
+Tasks are registered as ``@broker.task`` for manual invocation via ``.kiq()``
+and also run automatically via ``start_scheduler()`` which launches asyncio
+background loops during application lifespan.
+"""
+
+import asyncio
 from datetime import UTC, datetime
 
 import structlog
@@ -8,6 +14,47 @@ from sqlalchemy import and_, select
 from app.tasks import broker
 
 logger = structlog.get_logger(__name__)
+
+_scheduler_tasks: list[asyncio.Task] = []  # type: ignore[type-arg]
+
+
+async def _run_periodic(name: str, coro_fn, interval_seconds: int) -> None:  # noqa: ANN001
+    """Run *coro_fn* every *interval_seconds*, catching exceptions."""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            result = await coro_fn()
+            logger.info(f"scheduler_{name}_ok", result=result)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception(f"scheduler_{name}_error")
+
+
+async def start_scheduler() -> None:
+    """Launch background loops — call from FastAPI lifespan startup."""
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic("expiry_check", deactivate_expired_subscriptions, 3600),
+            name="sched_deactivate",
+        )
+    )
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic("reminder_check", check_expiring_subscriptions, 86400),
+            name="sched_reminders",
+        )
+    )
+    logger.info("scheduler_started", tasks=len(_scheduler_tasks))
+
+
+async def stop_scheduler() -> None:
+    """Cancel background loops — call from FastAPI lifespan shutdown."""
+    for t in _scheduler_tasks:
+        t.cancel()
+    await asyncio.gather(*_scheduler_tasks, return_exceptions=True)
+    _scheduler_tasks.clear()
+    logger.info("scheduler_stopped")
 
 
 @broker.task  # type: ignore[misc]

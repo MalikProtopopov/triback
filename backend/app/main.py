@@ -63,9 +63,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("redis_unreachable", hint="Check REDIS_URL in .env")
 
     await broker.startup()
+
+    from app.tasks.scheduler import start_scheduler, stop_scheduler
+
+    await start_scheduler()
     logger.info("startup_complete", db=db_ok, redis=redis_ok)
     yield
     logger.info("shutting_down")
+    await stop_scheduler()
     await broker.shutdown()
 
 

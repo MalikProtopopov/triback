@@ -29,10 +29,16 @@ class CertificateService:
         self.db = db
 
     async def _has_active_subscription(self, user_id: str) -> bool:
+        from sqlalchemy import func, or_
+
         result = await self.db.execute(
             select(Subscription.id).where(
                 Subscription.user_id == user_id,
                 Subscription.status == SubscriptionStatus.ACTIVE,
+                or_(
+                    Subscription.ends_at.is_(None),
+                    Subscription.ends_at > func.now(),
+                ),
             ).limit(1)
         )
         return result.scalar_one_or_none() is not None

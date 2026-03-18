@@ -257,6 +257,24 @@ async def send_doctor_invite_email(
 
 
 @broker.task  # type: ignore[misc]
+async def send_receipt_available_notification(
+    email: str, receipt_url: str, amount: float
+) -> None:
+    safe_url = _safe_url(receipt_url)
+    if not safe_url:
+        logger.warning("receipt_url_invalid_or_empty", email=email)
+        return
+    html_body = _wrap_html(
+        f"<h2 style='margin:0 0 16px;color:#1f2937;'>Ваш чек готов</h2>"
+        f"<p style='color:#4b5563;line-height:1.6;'>"
+        f"Чек на сумму <strong>{amount:.2f} ₽</strong> сформирован и доступен для скачивания.</p>"
+        f"{_button(safe_url, 'Скачать чек')}"
+        f"<p style='color:#9ca3af;font-size:13px;'>Чек также доступен в вашем личном кабинете в разделе «Платежи».</p>"
+    )
+    await send_smtp_email(email, f"Ваш чек — {_BRAND}", html_body)
+
+
+@broker.task  # type: ignore[misc]
 async def send_guest_account_created(
     email: str, temp_password: str, event_title: str, frontend_url: str
 ) -> None:

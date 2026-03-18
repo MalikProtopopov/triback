@@ -74,8 +74,11 @@ def redis_mock() -> AsyncMock:
     async def _get(key: str) -> str | None:
         return _store.get(key)
 
-    async def _set(key: str, value: str, **kwargs) -> None:  # noqa: ANN003
+    async def _set(key: str, value: str, **kwargs) -> bool | None:  # noqa: ANN003
+        if kwargs.get("nx") and key in _store:
+            return None
         _store[key] = value
+        return True
 
     async def _delete(*keys: str) -> None:
         for k in keys:

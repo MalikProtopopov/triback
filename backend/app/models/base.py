@@ -193,6 +193,7 @@ PaymentProvider = SAEnum(
     "yookassa",
     "psb",
     "manual",
+    "moneta",
     name="payment_provider",
     native_enum=True,
 )

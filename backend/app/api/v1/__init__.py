@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.certificates import router as certificates_router
+from app.api.v1.colleagues import router as colleagues_router
 from app.api.v1.content_admin import router as content_admin_router
 from app.api.v1.content_blocks_admin import router as content_blocks_admin_router
 from app.api.v1.dashboard import router as dashboard_router
@@ -29,6 +30,7 @@ router.include_router(onboarding_router, tags=["Onboarding"])
 router.include_router(profile_router, tags=["Profile"])
 router.include_router(subscriptions_router, tags=["Subscriptions"])
 router.include_router(certificates_router, tags=["Certificates"])
+router.include_router(colleagues_router, tags=["Colleagues"])
 router.include_router(telegram_router, tags=["Telegram"])
 router.include_router(voting_router, tags=["Voting"])
 router.include_router(public_router, tags=["Public"])

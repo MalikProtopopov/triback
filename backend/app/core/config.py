@@ -54,7 +54,46 @@ class Settings(BaseSettings):
     S3_BUCKET: str = "triho-dev"
     S3_PUBLIC_URL: str = ""
 
-    # YooKassa
+    # Payment provider selection
+    PAYMENT_PROVIDER: str = "moneta"  # "moneta" | "yookassa"
+
+    # Moneta / BPA PayAnyWay — invoice API (fiscalisation)
+    MONETA_BPA_API_URL: str = "https://bpa.payanyway.ru/api"
+    MONETA_BPA_KEY: str = ""
+    MONETA_BPA_SECRET: str = ""
+
+    # Moneta — accounts
+    MONETA_CREDIT_ACCOUNT: str = ""
+    MONETA_DEBIT_ACCOUNT: str = ""
+    MONETA_SELLER_ACCOUNT: str = ""
+    MONETA_SELLER_INN: str = ""
+    MONETA_SELLER_NAME: str = ""
+    MONETA_SELLER_PHONE: str = ""
+
+    # Moneta — Assistant (payment form)
+    MONETA_MNT_ID: str = ""
+    MONETA_ASSISTANT_URL: str = "https://moneta.ru/assistant.htm"
+    MONETA_WIDGET_URL: str = "https://moneta.ru/assistant.widget"
+    MONETA_DEMO_MODE: bool = False
+
+    # Moneta — webhook (Pay URL / Check URL)
+    MONETA_WEBHOOK_SECRET: str = ""
+
+    # Moneta — redirect URLs for buyer
+    MONETA_SUCCESS_URL: str = ""
+    MONETA_FAIL_URL: str = ""
+    MONETA_INPROGRESS_URL: str = ""
+    MONETA_RETURN_URL: str = ""
+
+    # Moneta — fiscalisation
+    MONETA_VAT_CODE: int = 1105
+    MONETA_PAYMENT_OBJECT: str = "service"
+    MONETA_PAYMENT_METHOD: str = "full_payment"
+
+    # Moneta — payment form version (v3 supports SBP, SberPay)
+    MONETA_FORM_VERSION: str = "v3"
+
+    # Legacy YooKassa (used when PAYMENT_PROVIDER=yookassa)
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3"

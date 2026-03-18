@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import structlog
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -175,6 +175,10 @@ class TelegramService:
                 select(Subscription.id).where(
                     Subscription.user_id == binding.user_id,
                     Subscription.status == SubscriptionStatus.ACTIVE,
+                    or_(
+                        Subscription.ends_at.is_(None),
+                        Subscription.ends_at > func.now(),
+                    ),
                 )
             )
         ).scalar_one_or_none()

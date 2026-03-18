@@ -23,7 +23,7 @@ from app.schemas.event_registration import (
     RegisterForEventRequest,
     RegisterForEventResponse,
 )
-from app.services.payment_service import YooKassaClient
+from app.services.payment_providers import PaymentItem, get_provider
 
 logger = structlog.get_logger(__name__)
 
@@ -42,7 +42,7 @@ class EventRegistrationService:
     def __init__(self, db: AsyncSession, redis: Redis) -> None:  # type: ignore[type-arg]
         self.db = db
         self.redis = redis
-        self.yookassa = YooKassaClient()
+        self.provider = get_provider()
 
     async def register(
         self,
@@ -175,8 +175,8 @@ class EventRegistrationService:
             user_id=new_user_id,
             amount=applied_price,
             product_type="event",
-            payment_provider="yookassa",
-            status="pending",
+            payment_provider=settings.PAYMENT_PROVIDER,
+            status=PaymentStatus.PENDING,
             event_registration_id=reg.id,
             idempotency_key=body.idempotency_key,
             description=f"{event.title} — {tariff.name}",
@@ -249,8 +249,8 @@ class EventRegistrationService:
             user_id=user_id,
             amount=applied_price,
             product_type="event",
-            payment_provider="yookassa",
-            status="pending",
+            payment_provider=settings.PAYMENT_PROVIDER,
+            status=PaymentStatus.PENDING,
             event_registration_id=reg.id,
             idempotency_key=body.idempotency_key,
             description=f"{event.title} — {tariff.name}",
@@ -292,32 +292,32 @@ class EventRegistrationService:
             return None
 
         email_for_receipt = fiscal_email or receipt_email
-        from app.services.payment_utils import build_receipt
+        description = f"{event.title} — {tariff.name}"
+        items = [PaymentItem(name=description, price=Decimal(str(applied_price)))]
 
-        receipt = build_receipt(
-            email=email_for_receipt,
-            description=f"{event.title} — {tariff.name}",
-            amount=Decimal(str(applied_price)),
-        )
-
-        return_url = f"{settings.YOOKASSA_RETURN_URL}?payment_id={payment.id}"
-        yookassa_resp = await self.yookassa.create_payment(
-            amount=Decimal(str(applied_price)),
-            description=payment.description or "",
+        if settings.PAYMENT_PROVIDER == "moneta":
+            return_url = settings.MONETA_RETURN_URL or settings.MONETA_SUCCESS_URL
+        else:
+            return_url = settings.YOOKASSA_RETURN_URL
+        result = await self.provider.create_payment(
+            transaction_id=str(payment.id),
+            items=items,
+            total_amount=Decimal(str(applied_price)),
+            description=payment.description or description,
+            customer_email=email_for_receipt,
+            return_url=return_url,
+            idempotency_key=payment.idempotency_key or "",
             metadata={
-                "internal_payment_id": str(payment.id),
                 "product_type": "event",
                 "user_id": str(payment.user_id),
                 "event_id": str(event.id),
                 "registration_id": str(reg.id),
             },
-            idempotency_key=payment.idempotency_key or "",
-            return_url=return_url,
-            receipt=receipt,
         )
-        payment.external_payment_id = yookassa_resp.get("id")
-        confirmation = yookassa_resp.get("confirmation", {})
-        payment.external_payment_url = confirmation.get("confirmation_url")
+        payment.external_payment_id = result.external_id
+        payment.external_payment_url = result.payment_url
+        if settings.PAYMENT_PROVIDER == "moneta":
+            payment.moneta_operation_id = result.external_id
         return payment.external_payment_url
 
     async def _send_verification_code(
@@ -392,10 +392,16 @@ class EventRegistrationService:
         return user.id
 
     async def _has_active_subscription(self, user_id: UUID) -> bool:
+        from sqlalchemy import func
+
         result = await self.db.execute(
             select(Subscription.id).where(
                 Subscription.user_id == user_id,
                 Subscription.status == SubscriptionStatus.ACTIVE,
+                or_(
+                    Subscription.ends_at.is_(None),
+                    Subscription.ends_at > func.now(),
+                ),
             ).limit(1)
         )
         return result.scalar_one_or_none() is not None

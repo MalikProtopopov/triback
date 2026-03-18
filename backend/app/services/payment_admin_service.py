@@ -24,7 +24,7 @@ from app.schemas.payments import (
     PaymentsSummary,
     PaymentUserNested,
 )
-from app.services.payment_service import YooKassaClient
+from app.services.payment_providers import get_provider
 from app.services.payment_webhook_service import PaymentWebhookService
 from app.tasks.email_tasks import send_payment_succeeded_notification
 
@@ -34,7 +34,7 @@ logger = structlog.get_logger(__name__)
 class PaymentAdminService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self.yookassa = YooKassaClient()
+        self.provider = get_provider()
 
     async def list_payments(
         self,
@@ -201,7 +201,7 @@ class PaymentAdminService:
             )
         if not payment.external_payment_id:
             raise AppValidationError(
-                "Cannot refund a manual payment through YooKassa"
+                "Cannot refund a manual payment — no external payment ID"
             )
 
         refund_amount = Decimal(str(amount)) if amount else Decimal(str(payment.amount))
@@ -209,23 +209,29 @@ class PaymentAdminService:
             raise AppValidationError("Refund amount exceeds payment amount")
 
         idempotency_key = f"refund-{payment.id}-{refund_amount}"
-        yookassa_resp = await self.yookassa.create_refund(
-            payment_id=payment.external_payment_id,
-            amount=refund_amount,
-            description=reason,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            refund_result = await self.provider.create_refund(
+                external_payment_id=payment.external_payment_id,
+                amount=refund_amount,
+                description=reason,
+                idempotency_key=idempotency_key,
+            )
+        except NotImplementedError:
+            raise AppValidationError(
+                "Возвраты через текущий платёжный провайдер не поддерживаются автоматически. "
+                "Используйте ЛК провайдера для оформления возврата."
+            )
 
         logger.info(
             "refund_initiated",
             payment_id=str(payment_id),
-            refund_id=yookassa_resp.get("id"),
+            refund_id=refund_result.external_id,
             amount=str(refund_amount),
         )
 
         return RefundResponse(
-            refund_id=yookassa_resp.get("id", ""),
+            refund_id=refund_result.external_id,
             payment_id=str(payment.external_payment_id),
-            status=yookassa_resp.get("status", "pending"),
+            status=refund_result.status,
             amount=float(refund_amount),
         ).model_dump()

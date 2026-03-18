@@ -8,6 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.users import User
+from app.services.payment_providers.base import CreatePaymentResult
 
 STATUS_URL = "/api/v1/subscriptions/status"
 PAY_URL = "/api/v1/subscriptions/pay"
@@ -48,25 +49,28 @@ async def test_pay_entry_fee_no_subscription(
     db_session: AsyncSession,
 ):
     """First-time doctor with no prior payments gets product_type=entry_fee."""
+    from app.models.subscriptions import Plan
+
     from tests.factories import create_doctor_profile, create_plan
 
     await create_doctor_profile(
         db_session, user=doctor_user, status="active", has_medical_diploma=True
     )
+    entry_plan = Plan(code="entry_fee_nf", name="Членский взнос", price=5000.0, duration_months=0, is_active=True, plan_type="entry_fee")
+    db_session.add(entry_plan)
     plan = await create_plan(db_session)
     await db_session.commit()
 
-    mock_resp = {
-        "id": "yoo_entry_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/entry"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_entry_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/entry",
+    )
 
-    with patch(
-        "app.services.subscription_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_resp,
-    ):
+    with patch("app.services.subscription_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
         resp = await client.post(
             PAY_URL,
             headers=auth_headers_doctor,
@@ -113,17 +117,16 @@ async def test_pay_subscription_within_90_days(
     )
     await db_session.commit()
 
-    mock_resp = {
-        "id": "yoo_renew_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/renew"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_renew_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/renew",
+    )
 
-    with patch(
-        "app.services.subscription_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_resp,
-    ):
+    with patch("app.services.subscription_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
         resp = await client.post(
             PAY_URL,
             headers=auth_headers_doctor,
@@ -140,11 +143,15 @@ async def test_pay_entry_fee_over_90_days(
     db_session: AsyncSession,
 ):
     """Lapsed > 90 days -> product_type=entry_fee again."""
+    from app.models.subscriptions import Plan
+
     from tests.factories import create_doctor_profile, create_plan, create_subscription
 
     await create_doctor_profile(
         db_session, user=doctor_user, status="active", has_medical_diploma=True
     )
+    entry_plan = Plan(code="entry_fee_90d", name="Членский взнос", price=5000.0, duration_months=0, is_active=True, plan_type="entry_fee")
+    db_session.add(entry_plan)
     plan = await create_plan(db_session)
     now = datetime.now(UTC)
     await create_subscription(
@@ -157,17 +164,16 @@ async def test_pay_entry_fee_over_90_days(
     )
     await db_session.commit()
 
-    mock_resp = {
-        "id": "yoo_lapse_" + uuid4().hex[:8],
-        "status": "pending",
-        "confirmation": {"confirmation_url": "https://yookassa.ru/pay/lapse"},
-    }
+    mock_result = CreatePaymentResult(
+        external_id="op_lapse_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/lapse",
+    )
 
-    with patch(
-        "app.services.subscription_service.YooKassaClient.create_payment",
-        new_callable=AsyncMock,
-        return_value=mock_resp,
-    ):
+    with patch("app.services.subscription_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
         resp = await client.post(
             PAY_URL,
             headers=auth_headers_doctor,

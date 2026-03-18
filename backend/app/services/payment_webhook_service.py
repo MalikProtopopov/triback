@@ -1,4 +1,4 @@
-"""Payment webhook handler — process YooKassa callbacks."""
+"""Payment webhook handler — process YooKassa and Moneta callbacks."""
 
 from __future__ import annotations
 
@@ -141,15 +141,15 @@ class PaymentWebhookService:
         if sub.status != SubscriptionStatus.ACTIVE:
             sub.status = SubscriptionStatus.ACTIVE  # type: ignore[assignment]
 
+        from dateutil.relativedelta import relativedelta
+
         prev_end = sub.ends_at
         if prev_end and prev_end > now:
             sub.starts_at = sub.starts_at or now
+            sub.ends_at = prev_end + relativedelta(months=duration_months)
         else:
             sub.starts_at = now
-
-        from dateutil.relativedelta import relativedelta
-
-        sub.ends_at = (sub.starts_at or now) + relativedelta(months=duration_months)
+            sub.ends_at = now + relativedelta(months=duration_months)
 
         dp_result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == payment.user_id)
@@ -207,3 +207,39 @@ class PaymentWebhookService:
             await self._cancel_event_registration(payment)
 
         await self.db.commit()
+
+    # ------------------------------------------------------------------
+    # Moneta-specific handlers
+    # ------------------------------------------------------------------
+
+    async def handle_moneta_payment_succeeded(self, payment: Payment) -> None:
+        """Process a successful Moneta payment — same business logic as YooKassa."""
+        if payment.status == PaymentStatus.SUCCEEDED:
+            return
+
+        now = datetime.now(UTC)
+        payment.status = PaymentStatus.SUCCEEDED  # type: ignore[assignment]
+        payment.paid_at = now
+
+        if payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
+            await self._activate_subscription(payment, now)
+        elif payment.product_type == ProductType.EVENT:
+            await self._confirm_event_registration(payment)
+
+        await self.db.commit()
+
+        from app.models.users import User
+
+        email_result = await self.db.execute(
+            select(User.email).where(User.id == payment.user_id)
+        )
+        email = email_result.scalar_one_or_none()
+        if email:
+            await send_payment_succeeded_notification.kiq(
+                email, float(payment.amount), payment.product_type, None
+            )
+            from app.tasks.telegram_tasks import notify_admin_payment_received
+
+            await notify_admin_payment_received.kiq(
+                email, float(payment.amount), payment.product_type
+            )
