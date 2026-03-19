@@ -55,10 +55,30 @@ class SubscriptionService:
 
     async def pay(self, user_id: UUID, plan_id: UUID, idempotency_key: str) -> PayResponse:
         cache_key = f"idempotency:pay:{user_id}:{idempotency_key}"
+
+        # Проверяем кэш, но сначала убеждаемся что платёж ещё pending и не истёк
         cached = await self.redis.get(cache_key)
         if cached:
             data = json.loads(cached)
-            return PayResponse(**data)
+            cached_payment_id = data.get("payment_id")
+            if cached_payment_id:
+                existing_result = await self.db.execute(
+                    select(Payment).where(Payment.id == cached_payment_id)
+                )
+                existing_pay = existing_result.scalar_one_or_none()
+                now = datetime.now(UTC)
+                is_still_valid = (
+                    existing_pay is not None
+                    and existing_pay.status == PaymentStatus.PENDING
+                    and (
+                        existing_pay.expires_at is None
+                        or existing_pay.expires_at > now
+                    )
+                )
+                if is_still_valid:
+                    return PayResponse(**data)
+                # Кэш устарел — удаляем и создаём новый платёж
+                await self.redis.delete(cache_key)
 
         # Idempotency: вернуть существующий только если он ещё pending и не истёк
         existing_result = await self.db.execute(
