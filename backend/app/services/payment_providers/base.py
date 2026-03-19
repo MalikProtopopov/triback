@@ -84,3 +84,7 @@ class PaymentProvider(ABC):
         description: str = "",
         idempotency_key: str = "",
     ) -> RefundResult: ...
+
+    async def get_operation_status(self, operation_id: str) -> dict[str, Any]:
+        """Query the payment provider for operation details. Optional — not all providers support this."""
+        raise NotImplementedError

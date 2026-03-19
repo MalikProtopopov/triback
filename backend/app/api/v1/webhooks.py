@@ -203,21 +203,21 @@ async def moneta_check_webhook(
 
 
 # ------------------------------------------------------------------
-# Moneta — BPA receipt webhook
+# Moneta — receipt webhook (54-ФЗ fiscal receipt)
 # ------------------------------------------------------------------
 
 
 @router.post(
     "/moneta/receipt",
-    summary="Moneta BPA receipt webhook",
+    summary="Moneta receipt webhook",
 )
 async def moneta_receipt_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
-    """BPA PayAnyWay receipt webhook — фискальный чек.
+    """Moneta receipt webhook — фискальный чек (54-ФЗ).
 
-    Вызывается после формирования чека (54-ФЗ). Содержит JSON с `operation`
+    Вызывается после формирования чека. Содержит JSON с `operation`
     (ID операции Moneta) и `receipt` (URL чека). Сохраняет `Receipt` в БД
     и отправляет email пользователю со ссылкой на скачивание чека.
     """

@@ -57,23 +57,17 @@ class Settings(BaseSettings):
     # Payment provider selection
     PAYMENT_PROVIDER: str = "moneta"  # "moneta" | "yookassa"
 
-    # Moneta / BPA PayAnyWay — invoice API (fiscalisation)
-    MONETA_BPA_API_URL: str = "https://bpa.payanyway.ru/api"
-    MONETA_BPA_KEY: str = ""
-    MONETA_BPA_SECRET: str = ""
-
-    # Moneta — accounts
-    MONETA_CREDIT_ACCOUNT: str = ""
-    MONETA_DEBIT_ACCOUNT: str = ""
-    MONETA_SELLER_ACCOUNT: str = ""
-    MONETA_SELLER_INN: str = ""
-    MONETA_SELLER_NAME: str = ""
-    MONETA_SELLER_PHONE: str = ""
+    # Moneta — MerchantAPI v2 auth
+    MONETA_USERNAME: str = ""
+    MONETA_PASSWORD: str = ""
+    MONETA_SERVICE_URL: str = "https://service.moneta.ru/services"
+    MONETA_PAYEE_ACCOUNT: str = ""
+    MONETA_PAYMENT_PASSWORD: str = ""
 
     # Moneta — Assistant (payment form)
     MONETA_MNT_ID: str = ""
-    MONETA_ASSISTANT_URL: str = "https://moneta.ru/assistant.htm"
-    MONETA_WIDGET_URL: str = "https://moneta.ru/assistant.widget"
+    MONETA_ASSISTANT_URL: str = "https://www.payanyway.ru/assistant.htm"
+    MONETA_WIDGET_URL: str = "https://www.payanyway.ru/assistant.widget"
     MONETA_DEMO_MODE: bool = False
 
     # Moneta — webhook (Pay URL / Check URL)
@@ -84,11 +78,6 @@ class Settings(BaseSettings):
     MONETA_FAIL_URL: str = ""
     MONETA_INPROGRESS_URL: str = ""
     MONETA_RETURN_URL: str = ""
-
-    # Moneta — fiscalisation
-    MONETA_VAT_CODE: int = 1105
-    MONETA_PAYMENT_OBJECT: str = "service"
-    MONETA_PAYMENT_METHOD: str = "full_payment"
 
     # Moneta — payment form version (v3 supports SBP, SberPay)
     MONETA_FORM_VERSION: str = "v3"
