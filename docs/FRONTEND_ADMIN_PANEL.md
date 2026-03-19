@@ -1,6 +1,6 @@
 # Админ-панель — полная документация API для фронтенда
 
-**Дата:** 2026-03-18  
+**Дата:** 2026-03-19 (обновлено — истечение платежей, status_label, payment_url)  
 **Базовый URL:** `{API_URL}/api/v1`  
 **Swagger:** `{API_URL}/docs`  
 **Провайдер оплаты:** Moneta (BPA PayAnyWay)
@@ -277,7 +277,7 @@ Refresh — HttpOnly cookie `refresh_token_admin`, path `/api/v1/auth`.
 |----------|-----|---------|----------|
 | `limit` | int | 20 | 1–100 |
 | `offset` | int | 0 | — |
-| `status` | string? | — | `pending` / `succeeded` / `canceled` |
+| `status` | string? | — | `pending` / `succeeded` / `failed` / `expired` / `refunded` |
 | `product_type` | string? | — | `entry_fee` / `subscription` / `event` |
 | `user_id` | UUID? | — | Фильтр по пользователю |
 | `date_from` | datetime? | — | — |
@@ -295,7 +295,10 @@ Refresh — HttpOnly cookie `refresh_token_admin`, path `/api/v1/auth`.
     "product_type": "entry_fee",
     "payment_provider": "moneta",
     "status": "succeeded",
+    "status_label": "Оплачен",
     "description": "Вступительный + Годовой взнос",
+    "payment_url": null,
+    "expires_at": null,
     "has_receipt": true,
     "paid_at": "2026-01-15T14:30:00Z",
     "created_at": "2026-01-15T14:25:00Z"
@@ -307,6 +310,28 @@ Refresh — HttpOnly cookie `refresh_token_admin`, path `/api/v1/auth`.
   },
   "total": 32, "limit": 20, "offset": 0
 }
+```
+
+**Новые поля (обновление 2026-03-19):**
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `status_label` | string | Человекочитаемый статус на русском. Используйте для отображения в таблице вместо raw `status` |
+| `payment_url` | string \| null | Ссылка на оплату. Возвращается **только** для `status=pending` и если срок не истёк. Админ может скопировать и отправить пользователю |
+| `expires_at` | datetime \| null | Срок действия платежа. Только для `status=pending`. После этой даты ссылка = `null`, платёж переходит в `expired` |
+
+**Маппинг статусов для отображения (status → status_label):**
+
+| status | status_label | Цвет (рекомендация) |
+|--------|-------------|---------------------|
+| `pending` | Ожидает оплаты | Жёлтый/оранжевый |
+| `succeeded` | Оплачен | Зелёный |
+| `failed` | Отклонён | Красный |
+| `expired` | Истёк | Серый |
+| `refunded` | Возвращён | Фиолетовый |
+| `partially_refunded` | Частичный возврат | Фиолетовый светлый |
+
+**ВАЖНО:** Ранее фронт мог ошибочно интерпретировать `status: "pending"` как «На модерации». Это **неверно**. Статус `pending` у платежа = «Ожидает оплаты». «На модерации» — это статус **профиля врача** (`moderation_status: "pending_review"`), который не связан с платежами. Используйте `status_label` для корректного отображения
 ```
 
 ### 6.2 Ручной платёж
@@ -684,12 +709,22 @@ BPA PayAnyWay формирует чеки автоматически. `inventory
 
 ### 16.5 Статусы платежей
 
-| Status | Описание |
-|--------|----------|
-| `pending` | Создан, ожидает оплату на стороне Moneta |
-| `succeeded` | Оплачен (webhook получен) |
-| `failed` | Отменён / ошибка |
-| `refunded` | Возврат |
+| Status | status_label | Описание |
+|--------|-------------|----------|
+| `pending` | Ожидает оплаты | Создан, ожидает оплату на стороне Moneta. Есть `payment_url` и `expires_at` |
+| `succeeded` | Оплачен | Оплачен (webhook получен) |
+| `failed` | Отклонён | Отменён пользователем или ошибка платёжной системы |
+| `expired` | Истёк | Не оплачен в отведённое время (по умолчанию 24 часа). Связанная подписка отменена — пользователь может создать новый платёж |
+| `refunded` | Возвращён | Полный возврат |
+| `partially_refunded` | Частичный возврат | Частичный возврат |
+
+**Жизненный цикл платежа:**
+```
+pending → succeeded (webhook оплаты от Moneta)
+pending → failed    (webhook отмены от Moneta)
+pending → expired   (автоматически через 24 часа, если нет оплаты)
+succeeded → refunded / partially_refunded (возврат)
+```
 
 ### 16.6 Cron-задачи (автоматические)
 
@@ -697,6 +732,7 @@ BPA PayAnyWay формирует чеки автоматически. `inventory
 |--------|---------|----------|
 | `deactivate_expired_subscriptions` | Каждый час | `active` → `expired`, удаление из Telegram-канала |
 | `check_expiring_subscriptions` | Ежедневно | Email-напоминания за 30/7/3/1 день |
+| `expire_stale_pending_payments` | Каждые 30 мин | `pending` платежи с `expires_at < now()` → `expired`. Связанные `pending_payment` подписки → `cancelled` |
 
 ---
 
@@ -733,7 +769,7 @@ BPA PayAnyWay формирует чеки автоматически. `inventory
 | Группа | Значения |
 |--------|----------|
 | Subscription status | `pending_payment`, `active`, `expired` |
-| Payment status | `pending`, `succeeded`, `failed`, `refunded` |
+| Payment status | `pending`, `succeeded`, `failed`, `expired`, `refunded`, `partially_refunded` |
 | Product type | `entry_fee`, `subscription`, `event` |
 | Doctor status | `pending_review`, `approved`, `active`, `inactive` |
 | Event status | `upcoming`, `ongoing`, `finished`, `cancelled` |

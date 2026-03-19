@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     YOOKASSA_RETURN_URL: str = "https://trichology.ru/payment/result"
     YOOKASSA_IP_WHITELIST: str = "185.71.76.0/27,185.71.77.0/27,77.75.153.0/25,77.75.156.11/32,77.75.156.35/32"
     PAYMENT_IDEMPOTENCY_TTL: int = 86400
+    PAYMENT_EXPIRATION_HOURS: int = 24
 
     # SMTP
     SMTP_HOST: str = "localhost"

@@ -21,7 +21,10 @@ class PaymentListItem(BaseModel):
     product_type: str
     payment_provider: str
     status: str
+    status_label: str = ""
     description: str | None = None
+    payment_url: str | None = None
+    expires_at: datetime | None = None
     has_receipt: bool = False
     paid_at: datetime | None = None
     created_at: datetime

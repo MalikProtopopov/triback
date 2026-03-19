@@ -135,6 +135,7 @@ class Payment(Base, UUIDMixin, TimestampMixin):
     idempotency_key: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(500))
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     moneta_operation_id: Mapped[str | None] = mapped_column(String(255))
 
     subscription: Mapped["Subscription | None"] = relationship(back_populates="payments")

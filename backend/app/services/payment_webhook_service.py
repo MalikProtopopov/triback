@@ -168,7 +168,7 @@ class PaymentWebhookService:
             reg.status = EventRegistrationStatus.CONFIRMED  # type: ignore[assignment]
 
     async def _handle_payment_canceled(self, payment: Payment) -> None:
-        if payment.status in (PaymentStatus.SUCCEEDED, PaymentStatus.FAILED):
+        if payment.status in (PaymentStatus.SUCCEEDED, PaymentStatus.FAILED, PaymentStatus.EXPIRED):
             return
         payment.status = PaymentStatus.FAILED  # type: ignore[assignment]
 

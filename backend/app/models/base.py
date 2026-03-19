@@ -92,6 +92,7 @@ PaymentStatus = SAEnum(
     "pending",
     "succeeded",
     "failed",
+    "expired",
     "partially_refunded",
     "refunded",
     name="payment_status",

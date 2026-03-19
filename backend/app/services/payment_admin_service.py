@@ -25,6 +25,7 @@ from app.schemas.payments import (
     PaymentUserNested,
 )
 from app.services.payment_providers import get_provider
+from app.services.payment_user_service import _payment_url_if_active
 from app.services.payment_webhook_service import PaymentWebhookService
 from app.tasks.email_tasks import send_payment_succeeded_notification
 
@@ -107,6 +108,8 @@ class PaymentAdminService:
             for uid, fn, ln in dp_q.all():
                 dp_name_map[uid] = f"{ln} {fn}"
 
+        from app.schemas.subscriptions import _STATUS_LABELS
+
         items: list[PaymentListItem] = []
         for p in rows:
             u_info = user_map.get(p.user_id)
@@ -123,7 +126,10 @@ class PaymentAdminService:
                     product_type=p.product_type,
                     payment_provider=p.payment_provider,
                     status=p.status,
+                    status_label=_STATUS_LABELS.get(p.status, p.status),
                     description=p.description,
+                    payment_url=_payment_url_if_active(p),
+                    expires_at=p.expires_at if p.status == "pending" else None,
                     has_receipt=bool(p.receipts) if hasattr(p, "receipts") else False,
                     paid_at=p.paid_at,
                     created_at=p.created_at,

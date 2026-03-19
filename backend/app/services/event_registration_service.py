@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import random
 import secrets
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -180,6 +181,7 @@ class EventRegistrationService:
             event_registration_id=reg.id,
             idempotency_key=body.idempotency_key,
             description=f"{event.title} — {tariff.name}",
+            expires_at=datetime.now(UTC) + timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS),
         )
         self.db.add(payment)
         await self.db.flush()
@@ -254,6 +256,7 @@ class EventRegistrationService:
             event_registration_id=reg.id,
             idempotency_key=body.idempotency_key,
             description=f"{event.title} — {tariff.name}",
+            expires_at=datetime.now(UTC) + timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS),
         )
         self.db.add(payment)
         await self.db.flush()

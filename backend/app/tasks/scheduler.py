@@ -6,10 +6,10 @@ background loops during application lifespan.
 """
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 
 from app.tasks import broker
 
@@ -43,6 +43,12 @@ async def start_scheduler() -> None:
         asyncio.create_task(
             _run_periodic("reminder_check", check_expiring_subscriptions, 86400),
             name="sched_reminders",
+        )
+    )
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic("expire_payments", expire_stale_pending_payments, 1800),
+            name="sched_expire_payments",
         )
     )
     logger.info("scheduler_started", tasks=len(_scheduler_tasks))
@@ -122,3 +128,51 @@ async def deactivate_expired_subscriptions() -> int:
 
     logger.info("deactivate_expired_done", deactivated=deactivated)
     return deactivated
+
+
+@broker.task  # type: ignore[misc]
+async def expire_stale_pending_payments() -> int:
+    """Every 30 min: mark pending payments past their expires_at as expired.
+
+    Handles both:
+    - payments with explicit expires_at in the past
+    - legacy payments without expires_at but created > 24 h ago
+
+    Also cancels linked subscriptions that are still in pending_payment state
+    so the user can start a fresh payment flow.
+    """
+    from app.core.config import settings
+    from app.core.database import AsyncSessionLocal
+    from app.models.subscriptions import Payment, Subscription
+
+    now = datetime.now(UTC)
+    fallback_cutoff = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
+    expired_count = 0
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Payment).where(
+                and_(
+                    Payment.status == "pending",
+                    or_(
+                        and_(Payment.expires_at.isnot(None), Payment.expires_at < now),
+                        and_(Payment.expires_at.is_(None), Payment.created_at < fallback_cutoff),
+                    ),
+                )
+            )
+        )
+        stale_payments = result.scalars().all()
+
+        for payment in stale_payments:
+            payment.status = "expired"  # type: ignore[assignment]
+            expired_count += 1
+
+            if payment.subscription_id:
+                sub = await db.get(Subscription, payment.subscription_id)
+                if sub and sub.status == "pending_payment":
+                    sub.status = "cancelled"  # type: ignore[assignment]
+
+        await db.commit()
+
+    logger.info("expire_stale_payments_done", expired=expired_count)
+    return expired_count

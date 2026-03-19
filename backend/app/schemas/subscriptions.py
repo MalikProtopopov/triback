@@ -52,12 +52,25 @@ class CurrentSubscriptionNested(BaseModel):
     days_remaining: int | None = None
 
 
+_STATUS_LABELS: dict[str, str] = {
+    "pending": "Ожидает оплаты",
+    "succeeded": "Оплачен",
+    "failed": "Отклонён",
+    "expired": "Истёк",
+    "refunded": "Возвращён",
+    "partially_refunded": "Частичный возврат",
+}
+
+
 class UserPaymentListItem(BaseModel):
     id: UUID
     amount: float
     product_type: str
     status: str
+    status_label: str = ""
     description: str | None = None
+    payment_url: str | None = None
+    expires_at: datetime | None = None
     paid_at: datetime | None = None
     created_at: datetime
 
@@ -67,7 +80,10 @@ class UserPaymentListItem(BaseModel):
             "amount": 20000.0,
             "product_type": "entry_fee",
             "status": "succeeded",
+            "status_label": "Оплачен",
             "description": "Вступительный взнос + Годовой взнос — Ассоциация трихологов",
+            "payment_url": None,
+            "expires_at": None,
             "paid_at": "2026-01-15T14:30:00Z",
             "created_at": "2026-01-15T14:25:00Z",
         }

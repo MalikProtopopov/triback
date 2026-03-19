@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.models.subscriptions import Payment
+
+
+def _payment_url_if_active(p: Payment) -> str | None:
+    """Return payment URL only for pending payments whose link hasn't expired."""
+    if p.status != "pending" or not p.external_payment_url:
+        return None
+    if p.expires_at and p.expires_at < datetime.now(UTC):
+        return None
+    return p.external_payment_url
 
 
 class PaymentUserService:
@@ -23,7 +33,7 @@ class PaymentUserService:
         limit: int = 20,
         offset: int = 0,
     ) -> dict[str, Any]:
-        from app.schemas.subscriptions import UserPaymentListItem
+        from app.schemas.subscriptions import UserPaymentListItem, _STATUS_LABELS
 
         base = select(Payment).where(Payment.user_id == user_id)
         count_q = select(func.count(Payment.id)).where(Payment.user_id == user_id)
@@ -41,7 +51,10 @@ class PaymentUserService:
                 amount=float(p.amount),
                 product_type=p.product_type,
                 status=p.status,
+                status_label=_STATUS_LABELS.get(p.status, p.status),
                 description=p.description,
+                payment_url=_payment_url_if_active(p),
+                expires_at=p.expires_at if p.status == "pending" else None,
                 paid_at=p.paid_at,
                 created_at=p.created_at,
             )

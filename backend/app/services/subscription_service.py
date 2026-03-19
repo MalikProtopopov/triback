@@ -16,7 +16,7 @@ from uuid import UUID
 import httpx
 import structlog
 from redis.asyncio import Redis
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -118,6 +118,7 @@ class SubscriptionService:
             subscription_id=sub.id,
             idempotency_key=idempotency_key,
             description=description,
+            expires_at=datetime.now(UTC) + timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS),
         )
         self.db.add(payment)
         await self.db.flush()
@@ -172,6 +173,7 @@ class SubscriptionService:
                     payment_id=existing.id,
                     payment_url=existing.external_payment_url or "",
                     amount=float(existing.amount),
+                    expires_at=existing.expires_at,
                 )
             raise
 
@@ -179,6 +181,7 @@ class SubscriptionService:
             payment_id=payment.id,
             payment_url=payment.external_payment_url or "",
             amount=float(total_amount),
+            expires_at=payment.expires_at,
         )
 
         ttl = getattr(settings, "PAYMENT_IDEMPOTENCY_TTL", 86400)
@@ -221,6 +224,45 @@ class SubscriptionService:
             )
         )
         return (result.scalar() or 0) > 0
+
+    async def _has_live_pending_payment(self, subscription_id: UUID, now: datetime) -> bool:
+        """Check if there is at least one pending payment with a valid (non-expired) link."""
+        fallback_cutoff = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
+        result = await self.db.execute(
+            select(func.count(Payment.id)).where(
+                and_(
+                    Payment.subscription_id == subscription_id,
+                    Payment.status == PaymentStatus.PENDING,
+                    or_(
+                        and_(Payment.expires_at.isnot(None), Payment.expires_at >= now),
+                        and_(Payment.expires_at.is_(None), Payment.created_at >= fallback_cutoff),
+                    ),
+                )
+            )
+        )
+        return (result.scalar() or 0) > 0
+
+    async def _expire_stale_payment_inline(self, sub: Subscription, now: datetime) -> None:
+        """Lazy cleanup: expire stale pending payments and cancel the subscription."""
+        fallback_cutoff = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
+        stale_result = await self.db.execute(
+            select(Payment).where(
+                and_(
+                    Payment.subscription_id == sub.id,
+                    Payment.status == PaymentStatus.PENDING,
+                )
+            )
+        )
+        for p in stale_result.scalars().all():
+            is_stale = (
+                (p.expires_at is not None and p.expires_at < now)
+                or (p.expires_at is None and p.created_at < fallback_cutoff)
+            )
+            if is_stale:
+                p.status = PaymentStatus.EXPIRED  # type: ignore[assignment]
+
+        sub.status = SubscriptionStatus.CANCELLED  # type: ignore[assignment]
+        await self.db.commit()
 
     # ── GET /subscriptions/status ─────────────────────────────────
 
@@ -312,7 +354,20 @@ class SubscriptionService:
         elif latest.status == SubscriptionStatus.EXPIRED:
             next_action = "renew"
         elif latest.status == SubscriptionStatus.PENDING_PAYMENT:
-            next_action = "complete_payment"
+            has_live_pending = await self._has_live_pending_payment(latest.id, now)
+            if has_live_pending:
+                next_action = "complete_payment"
+            else:
+                await self._expire_stale_payment_inline(latest, now)
+                next_action = (
+                    "pay_entry_fee_and_subscription" if entry_fee_required
+                    else "pay_subscription"
+                )
+        elif latest.status == SubscriptionStatus.CANCELLED:
+            next_action = (
+                "pay_entry_fee_and_subscription" if entry_fee_required
+                else "pay_subscription"
+            )
 
         return SubscriptionStatusResponse(
             has_subscription=latest.status == SubscriptionStatus.ACTIVE,

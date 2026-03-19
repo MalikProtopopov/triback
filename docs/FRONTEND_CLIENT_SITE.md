@@ -1,6 +1,6 @@
 # Клиентский сайт — полная документация API для фронтенда
 
-**Дата:** 2026-03-18  
+**Дата:** 2026-03-19 (обновлено — истечение платежей, payment_url в списке)  
 **Базовый URL:** `{API_URL}/api/v1`  
 **Swagger:** `{API_URL}/docs`  
 **Провайдер оплаты:** Moneta (Moneta.Assistant + BPA PayAnyWay)
@@ -404,23 +404,58 @@
   "payment_id": "uuid",
   "payment_url": "https://moneta.ru/assistant.htm?operationId=12345",
   "amount": 20000.0,
-  "expires_at": null
+  "expires_at": "2026-03-20T14:25:00Z"
 }
 ```
 
-Фронт: `window.location.href = payment_url`.
+| Поле | Описание |
+|------|----------|
+| `payment_url` | Ссылка для оплаты на Moneta. Redirect: `window.location.href = payment_url` |
+| `expires_at` | Дата/время истечения платежа (UTC). По умолчанию через 24 часа. После этого момента платёж автоматически перейдёт в `expired` |
+
+**Важно для фронта:**
+- Сохранить `idempotency_key` в `localStorage` (для повторной оплаты).
+- Сохранить `payment_id` для отслеживания.
+- После `expires_at` ссылка перестаёт работать — нужен новый платёж.
 
 ### GET `/subscriptions/payments` — ответ:
 
 ```json
 {
   "data": [{
-    "id": "uuid", "amount": 20000.0, "product_type": "entry_fee",
-    "status": "succeeded", "description": "Вступительный + Годовой взнос",
-    "paid_at": "2026-01-15T14:30:00Z", "created_at": "2026-01-15T14:25:00Z"
+    "id": "uuid",
+    "amount": 20000.0,
+    "product_type": "entry_fee",
+    "status": "succeeded",
+    "status_label": "Оплачен",
+    "description": "Вступительный + Годовой взнос",
+    "payment_url": null,
+    "expires_at": null,
+    "paid_at": "2026-01-15T14:30:00Z",
+    "created_at": "2026-01-15T14:25:00Z"
   }],
   "total": 3, "limit": 20, "offset": 0
 }
+```
+
+**Новые поля (обновление 2026-03-19):**
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `status_label` | string | Человекочитаемый статус на русском (`Ожидает оплаты`, `Оплачен`, `Отклонён`, `Истёк`, `Возвращён`, `Частичный возврат`) |
+| `payment_url` | string \| null | Ссылка на оплату. Возвращается **только** для `status=pending` и только если срок ещё не истёк. Иначе `null` |
+| `expires_at` | datetime \| null | Срок действия платежа. Возвращается **только** для `status=pending`. После этой даты платёж переходит в `expired` |
+
+**Логика отображения на фронте:**
+
+| status | status_label | payment_url | Что показать |
+|--------|-------------|-------------|--------------|
+| `pending` | Ожидает оплаты | `"https://..."` | Кнопка «Оплатить» (→ redirect на `payment_url`). Показать таймер до `expires_at` |
+| `pending` | Ожидает оплаты | `null` | Ссылка истекла. Текст: «Создайте новый платёж» |
+| `succeeded` | Оплачен | `null` | Зелёный статус. Кнопка «Чек» если есть |
+| `expired` | Истёк | `null` | Серый/жёлтый статус. Текст: «Время оплаты истекло» |
+| `failed` | Отклонён | `null` | Красный статус |
+| `refunded` | Возвращён | `null` | Статус возврата |
 ```
 
 ### GET `/subscriptions/payments/{id}/receipt` — ответ:
@@ -561,7 +596,7 @@ Member-сертификаты видны только при **активной 
 
 ### Порядок
 
-1. `POST /subscriptions/pay` (или регистрация на мероприятие) → получить `payment_url`.
+1. `POST /subscriptions/pay` (или регистрация на мероприятие) → получить `payment_url` и `expires_at`.
 2. `window.location.href = payment_url` — пользователь уходит на Moneta.
 3. Оплата на стороне Moneta.
 4. Redirect на `MONETA_SUCCESS_URL` (успех) или `MONETA_FAIL_URL` (отмена).
@@ -578,6 +613,21 @@ Member-сертификаты видны только при **активной 
 
 1. «Оплата не прошла».
 2. Кнопка «Попробовать снова» → вернуть на страницу оплаты.
+
+### Повторная оплата (pending платёж)
+
+Если пользователь покинул форму оплаты, не завершив:
+
+1. Платёж остаётся в `pending` и виден в `GET /subscriptions/payments` с `payment_url`.
+2. Фронт показывает кнопку «Оплатить» рядом с pending-платежом → redirect на `payment_url`.
+3. Если `payment_url = null` (ссылка истекла) или `expires_at` прошёл — показать «Время оплаты истекло. Создайте новый платёж».
+4. При `next_action == "complete_payment"` в `/subscriptions/status` — показать баннер с предложением завершить оплату.
+
+### Автоматическое истечение платежей
+
+- По умолчанию платёж живёт **24 часа** (`PAYMENT_EXPIRATION_HOURS`).
+- Каждые 30 минут бэкенд проверяет pending-платежи и переводит просроченные в статус `expired`.
+- При этом связанная подписка (`pending_payment`) переводится в `cancelled` — пользователь может создать новый платёж.
 
 ### Чеки
 
@@ -618,7 +668,7 @@ Member-сертификаты видны только при **активной 
 | Группа | Значения |
 |--------|----------|
 | Subscription status | `pending_payment`, `active`, `expired` |
-| Payment status | `pending`, `succeeded`, `failed`, `refunded` |
+| Payment status | `pending`, `succeeded`, `failed`, `expired`, `refunded`, `partially_refunded` |
 | Product type | `entry_fee`, `subscription`, `event` |
 | next_action | `pay_entry_fee_and_subscription`, `pay_subscription`, `renew`, `complete_payment`, `null` |
 | Moderation status | `pending_review`, `approved`, `rejected` |
