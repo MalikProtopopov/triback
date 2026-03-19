@@ -60,7 +60,7 @@ class SubscriptionService:
             data = json.loads(cached)
             return PayResponse(**data)
 
-        # Idempotency: если платёж уже есть в БД (кэш истёк), вернуть его
+        # Idempotency: вернуть существующий только если он ещё pending и не истёк
         existing_result = await self.db.execute(
             select(Payment).where(
                 Payment.user_id == user_id,
@@ -68,16 +68,21 @@ class SubscriptionService:
             )
         )
         existing_pay = existing_result.scalar_one_or_none()
-        if existing_pay:
-            resp = PayResponse(
-                payment_id=existing_pay.id,
-                payment_url=existing_pay.external_payment_url or "",
-                amount=float(existing_pay.amount),
-                expires_at=existing_pay.expires_at,
+        if existing_pay and existing_pay.status == PaymentStatus.PENDING:
+            now = datetime.now(UTC)
+            is_expired = (
+                existing_pay.expires_at is not None and existing_pay.expires_at < now
             )
-            ttl = getattr(settings, "PAYMENT_IDEMPOTENCY_TTL", 86400)
-            await self.redis.set(cache_key, resp.model_dump_json(), ex=ttl)
-            return resp
+            if not is_expired:
+                resp = PayResponse(
+                    payment_id=existing_pay.id,
+                    payment_url=existing_pay.external_payment_url or "",
+                    amount=float(existing_pay.amount),
+                    expires_at=existing_pay.expires_at,
+                )
+                ttl = getattr(settings, "PAYMENT_IDEMPOTENCY_TTL", 86400)
+                await self.redis.set(cache_key, resp.model_dump_json(), ex=ttl)
+                return resp
 
         sub_plan = await self.db.get(Plan, plan_id)
         if not sub_plan or not sub_plan.is_active:
@@ -128,6 +133,11 @@ class SubscriptionService:
         self.db.add(sub)
         await self.db.flush()
 
+        # Очистить старый idempotency_key если платёж уже не pending
+        if existing_pay and existing_pay.status != PaymentStatus.PENDING:
+            existing_pay.idempotency_key = None  # type: ignore[assignment]
+            await self.db.flush()
+
         payment = Payment(
             user_id=user_id,
             amount=float(total_amount),
@@ -140,28 +150,7 @@ class SubscriptionService:
             expires_at=datetime.now(UTC) + timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS),
         )
         self.db.add(payment)
-        try:
-            await self.db.flush()
-        except IntegrityError:
-            await self.db.rollback()
-            existing_result = await self.db.execute(
-                select(Payment).where(
-                    Payment.user_id == user_id,
-                    Payment.idempotency_key == idempotency_key,
-                )
-            )
-            existing_pay = existing_result.scalar_one_or_none()
-            if existing_pay:
-                resp = PayResponse(
-                    payment_id=existing_pay.id,
-                    payment_url=existing_pay.external_payment_url or "",
-                    amount=float(existing_pay.amount),
-                    expires_at=existing_pay.expires_at,
-                )
-                ttl = getattr(settings, "PAYMENT_IDEMPOTENCY_TTL", 86400)
-                await self.redis.set(cache_key, resp.model_dump_json(), ex=ttl)
-                return resp
-            raise
+        await self.db.flush()
 
         from app.models.users import User
 
@@ -196,26 +185,7 @@ class SubscriptionService:
         if settings.PAYMENT_PROVIDER == "moneta":
             payment.moneta_operation_id = result.external_id
 
-        try:
-            await self.db.commit()
-        except IntegrityError:
-            await self.db.rollback()
-            existing = (
-                await self.db.execute(
-                    select(Payment).where(
-                        Payment.user_id == user_id,
-                        Payment.idempotency_key == idempotency_key,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing:
-                return PayResponse(
-                    payment_id=existing.id,
-                    payment_url=existing.external_payment_url or "",
-                    amount=float(existing.amount),
-                    expires_at=existing.expires_at,
-                )
-            raise
+        await self.db.commit()
 
         resp = PayResponse(
             payment_id=payment.id,
