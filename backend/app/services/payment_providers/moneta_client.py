@@ -135,17 +135,34 @@ class MonetaPaymentProvider(PaymentProvider):
         mnt_subscriber_id = str(request_data.get("MNT_SUBSCRIBER_ID", ""))
         mnt_test_mode = str(request_data.get("MNT_TEST_MODE", ""))
         mnt_signature = str(request_data.get("MNT_SIGNATURE", ""))
+        mnt_command = str(request_data.get("MNT_COMMAND", ""))
 
-        expected = _md5(
-            mnt_id,
-            mnt_transaction_id,
-            mnt_operation_id,
-            mnt_amount,
-            mnt_currency,
-            mnt_subscriber_id,
-            mnt_test_mode,
-            self._webhook_secret,
-        )
+        if mnt_command:
+            # Check URL: MD5(MNT_COMMAND + MNT_ID + MNT_TRANSACTION_ID + MNT_AMOUNT
+            #   + MNT_CURRENCY_CODE + MNT_SUBSCRIBER_ID + MNT_TEST_MODE + secret)
+            expected = _md5(
+                mnt_command,
+                mnt_id,
+                mnt_transaction_id,
+                mnt_amount,
+                mnt_currency,
+                mnt_subscriber_id,
+                mnt_test_mode,
+                self._webhook_secret,
+            )
+        else:
+            # Pay URL: MD5(MNT_ID + MNT_TRANSACTION_ID + MNT_OPERATION_ID + MNT_AMOUNT
+            #   + MNT_CURRENCY_CODE + MNT_SUBSCRIBER_ID + MNT_TEST_MODE + secret)
+            expected = _md5(
+                mnt_id,
+                mnt_transaction_id,
+                mnt_operation_id,
+                mnt_amount,
+                mnt_currency,
+                mnt_subscriber_id,
+                mnt_test_mode,
+                self._webhook_secret,
+            )
 
         if mnt_signature.lower() != expected.lower():
             logger.warning(
