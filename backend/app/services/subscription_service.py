@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import httpx
 import structlog
 from redis.asyncio import Redis
 from sqlalchemy import and_, func, select
@@ -130,16 +131,24 @@ class SubscriptionService:
             return_url = settings.MONETA_RETURN_URL or settings.MONETA_SUCCESS_URL
         else:
             return_url = settings.YOOKASSA_RETURN_URL
-        result = await self.provider.create_payment(
-            transaction_id=str(payment.id),
-            items=items,
-            total_amount=total_amount,
-            description=description,
-            customer_email=user_email,
-            return_url=return_url,
-            idempotency_key=idempotency_key,
-            metadata={"product_type": product_type, "user_id": str(user_id)},
-        )
+        try:
+            result = await self.provider.create_payment(
+                transaction_id=str(payment.id),
+                items=items,
+                total_amount=total_amount,
+                description=description,
+                customer_email=user_email,
+                return_url=return_url,
+                idempotency_key=idempotency_key,
+                metadata={"product_type": product_type, "user_id": str(user_id)},
+            )
+        except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+            logger.error("payment_provider_error", error=str(exc), provider=settings.PAYMENT_PROVIDER)
+            await self.db.rollback()
+            raise AppValidationError(
+                f"Ошибка платёжной системы: {exc}",
+                details={"provider": settings.PAYMENT_PROVIDER},
+            ) from exc
 
         payment.external_payment_id = result.external_id
         payment.external_payment_url = result.payment_url
