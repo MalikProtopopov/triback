@@ -180,19 +180,15 @@ class SubscriptionService:
     async def _determine_product_type(self, user_id: UUID) -> str:
         result = await self.db.execute(
             select(Subscription)
-            .where(
-                and_(
-                    Subscription.user_id == user_id,
-                    Subscription.status == SubscriptionStatus.ACTIVE,
-                )
-            )
-            .order_by(Subscription.ends_at.desc())
+            .where(Subscription.user_id == user_id)
+            .order_by(Subscription.created_at.desc())
             .limit(1)
         )
         latest_sub = result.scalar_one_or_none()
 
+        has_entry = await self._has_paid_entry_fee(user_id)
+
         if not latest_sub or latest_sub.ends_at is None:
-            has_entry = await self._has_paid_entry_fee(user_id)
             return ProductType.SUBSCRIPTION if has_entry else ProductType.ENTRY_FEE
 
         now = datetime.now(UTC)
@@ -201,7 +197,7 @@ class SubscriptionService:
         else:
             lapse = now - latest_sub.ends_at
 
-        if lapse > timedelta(days=LAPSE_THRESHOLD_DAYS):
+        if not has_entry or lapse > timedelta(days=LAPSE_THRESHOLD_DAYS):
             return ProductType.ENTRY_FEE
         return ProductType.SUBSCRIPTION
 

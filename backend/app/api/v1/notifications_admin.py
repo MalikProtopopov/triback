@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
+from app.core.exceptions import AppValidationError
 from app.core.openapi import error_responses
 from app.core.pagination import PaginatedResponse, PaginationParams
 from app.core.security import require_role
@@ -51,7 +52,10 @@ async def send_notification(
             body=body.body,
         )
 
-    return {"id": str(last_notif.id), "status": last_notif.status} if last_notif else {"id": "", "status": "failed"}
+    if not last_notif:
+        raise AppValidationError("Не удалось отправить уведомление: каналы не указаны или недоступны")
+
+    return NotificationResponse(id=last_notif.id, status=last_notif.status)
 
 
 @router.get(

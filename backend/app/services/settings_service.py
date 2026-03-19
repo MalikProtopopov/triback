@@ -219,6 +219,7 @@ class SettingsAdminService:
                 duration_months=p.duration_months,
                 is_active=p.is_active,
                 sort_order=p.sort_order,
+                plan_type=getattr(p, "plan_type", "subscription"),
             )
             for p in rows
         ]
@@ -238,6 +239,7 @@ class SettingsAdminService:
             duration_months=data.get("duration_months", 12),
             is_active=data.get("is_active", True),
             sort_order=data.get("sort_order", 0),
+            plan_type=data.get("plan_type", "subscription"),
         )
         self.db.add(plan)
         await self.db.commit()
@@ -252,6 +254,7 @@ class SettingsAdminService:
             duration_months=plan.duration_months,
             is_active=plan.is_active,
             sort_order=plan.sort_order,
+            plan_type=plan.plan_type,
         )
 
     async def update_plan(self, plan_id: UUID, data: dict[str, Any]) -> PlanAdminResponse:
@@ -278,6 +281,7 @@ class SettingsAdminService:
             duration_months=plan.duration_months,
             is_active=plan.is_active,
             sort_order=plan.sort_order,
+            plan_type=plan.plan_type,
         )
 
     async def delete_plan(self, plan_id: UUID) -> None:
