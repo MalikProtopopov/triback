@@ -432,3 +432,84 @@ class SubscriptionService:
 
     async def cancel_payment(self, payment_id: UUID, reason: str) -> dict[str, Any]:
         return await self._admin.cancel_payment(payment_id, reason)
+
+    # ── POST /subscriptions/payments/{id}/check-status ─────────────
+
+    async def check_payment_status(self, user_id: UUID, payment_id: UUID) -> dict[str, Any]:
+        """Poll Moneta API for the real operation status and update payment if paid.
+
+        Fallback mechanism for when Pay URL webhooks are not delivered
+        (common in Moneta demo/test environments).
+        """
+        result = await self.db.execute(
+            select(Payment).where(Payment.id == payment_id).with_for_update()
+        )
+        payment = result.scalar_one_or_none()
+        if not payment:
+            raise NotFoundError("Payment not found")
+        if payment.user_id != user_id:
+            from app.core.exceptions import ForbiddenError
+            raise ForbiddenError("Payment belongs to another user")
+
+        if payment.status != PaymentStatus.PENDING:
+            return {
+                "payment_id": payment.id,
+                "status": payment.status,
+                "changed": False,
+                "message": f"Платёж уже в статусе '{payment.status}'",
+            }
+
+        operation_id = payment.moneta_operation_id or payment.external_payment_id
+        if not operation_id:
+            return {
+                "payment_id": payment.id,
+                "status": payment.status,
+                "changed": False,
+                "message": "Нет operation_id для проверки в Moneta",
+            }
+
+        from app.services.payment_providers.moneta_client import MonetaPaymentProvider
+
+        provider = MonetaPaymentProvider()
+        try:
+            op_info = await provider.get_operation_status(operation_id)
+        except Exception as exc:
+            logger.warning("moneta_check_status_error", error=str(exc), operation_id=operation_id)
+            return {
+                "payment_id": payment.id,
+                "status": payment.status,
+                "changed": False,
+                "message": f"Ошибка запроса к Moneta: {exc}",
+            }
+
+        moneta_status = op_info.get("status", "unknown")
+        attrs = op_info.get("attributes", {})
+        has_children = str(attrs.get("haschildren", "0")) != "0"
+
+        logger.info(
+            "moneta_poll_status",
+            payment_id=str(payment_id),
+            operation_id=operation_id,
+            moneta_status=moneta_status,
+            has_children=has_children,
+        )
+
+        confirmed_statuses = {"SUCCEED", "TAKENIN_NOTSENT", "TAKENOUT"}
+        if moneta_status in confirmed_statuses or has_children:
+            payment.moneta_operation_id = operation_id
+            svc = PaymentWebhookService(self.db)
+            await svc.handle_moneta_payment_succeeded(payment)
+            return {
+                "payment_id": payment.id,
+                "status": PaymentStatus.SUCCEEDED,
+                "changed": True,
+                "message": "Платёж подтверждён через Moneta API",
+            }
+
+        return {
+            "payment_id": payment.id,
+            "status": payment.status,
+            "changed": False,
+            "moneta_status": moneta_status,
+            "message": f"Операция в Moneta: {moneta_status}. Ожидаем подтверждения.",
+        }

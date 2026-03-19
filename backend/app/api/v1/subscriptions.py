@@ -100,6 +100,34 @@ async def list_my_payments(
     return await svc.list_user_payments(user_id, limit=limit, offset=offset)
 
 
+@router.post(
+    "/payments/{payment_id}/check-status",
+    summary="Проверка статуса платежа через Moneta API",
+    responses=error_responses(401, 403, 404),
+)
+async def check_payment_status(
+    payment_id: UUID,
+    payload: dict[str, Any] = DOCTOR,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> dict:
+    """Проверяет статус платежа напрямую через Moneta API.
+
+    Используется как fallback когда Pay URL webhook не доставлен.
+    Фронтенд вызывает этот endpoint после возврата пользователя
+    со страницы оплаты Moneta.
+
+    Если Moneta подтверждает оплату — платёж и подписка активируются.
+
+    - **401** — не авторизован
+    - **403** — платёж принадлежит другому пользователю
+    - **404** — платёж не найден
+    """
+    user_id = UUID(payload["sub"])
+    svc = SubscriptionService(db, redis)
+    return await svc.check_payment_status(user_id, payment_id)
+
+
 @router.get(
     "/payments/{payment_id}/receipt",
     response_model=ReceiptResponse,
