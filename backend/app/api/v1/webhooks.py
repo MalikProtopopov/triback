@@ -112,6 +112,7 @@ async def moneta_pay_webhook(
     Возвращает `SUCCESS` или `FAIL` (plain text).
     """
     params = await _collect_moneta_params(request)
+    logger.info("moneta_pay_request", params=params)
     mnt_operation_id = params.get("MNT_OPERATION_ID", "")
 
     dedup_key = f"webhook:dedup:moneta:{mnt_operation_id}"
@@ -176,6 +177,8 @@ async def moneta_check_webhook(
     mnt_id = params.get("MNT_ID", "")
     mnt_transaction_id = params.get("MNT_TRANSACTION_ID", "")
 
+    logger.info("moneta_check_request", params=params)
+
     provider = MonetaPaymentProvider()
 
     try:
@@ -183,6 +186,7 @@ async def moneta_check_webhook(
     except ValueError:
         logger.warning("moneta_check_signature_invalid", params=params)
         xml = provider.build_check_response(mnt_id, mnt_transaction_id, "500")
+        logger.info("moneta_check_response_xml", xml=xml)
         return Response(content=xml, media_type="application/xml; charset=utf-8")
 
     try:
@@ -206,7 +210,7 @@ async def moneta_check_webhook(
         "moneta_check_response",
         payment_found=payment is not None,
         payment_status=payment.status if payment else None,
-        result_code=xml[xml.find("<MNT_RESULT_CODE>") + 17:xml.find("</MNT_RESULT_CODE>")] if "<MNT_RESULT_CODE>" in xml else None,
+        xml=xml,
     )
 
     return Response(content=xml, media_type="application/xml; charset=utf-8")
