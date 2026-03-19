@@ -84,7 +84,13 @@ class MonetaPaymentProvider(PaymentProvider):
         body = await self._api_request("InvoiceRequest", invoice)
         resp = body["InvoiceResponse"]
         operation_id = str(resp["transaction"])
-        payment_url = self._build_payment_url(operation_id)
+
+        amount_str = f"{float(total_amount):.2f}"
+        payment_url = self._build_payment_url(
+            operation_id,
+            transaction_id=transaction_id,
+            amount=amount_str,
+        )
 
         return CreatePaymentResult(
             external_id=operation_id,
@@ -214,11 +220,36 @@ class MonetaPaymentProvider(PaymentProvider):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_payment_url(self, operation_id: str) -> str:
+    def _build_payment_url(
+        self,
+        operation_id: str,
+        *,
+        transaction_id: str = "",
+        amount: str = "",
+    ) -> str:
         base = self._assistant_url
         url = f"{base}?operationId={operation_id}"
         if self._form_version:
             url += f"&version={self._form_version}"
+
+        if transaction_id and self._webhook_secret:
+            test_mode = "1" if self._demo_mode else "0"
+            url += f"&MNT_ID={self._mnt_id}"
+            url += f"&MNT_TRANSACTION_ID={transaction_id}"
+            url += f"&MNT_AMOUNT={amount}"
+            url += f"&MNT_CURRENCY_CODE=RUB"
+            url += f"&MNT_TEST_MODE={test_mode}"
+            sig = _md5(
+                self._mnt_id,
+                transaction_id,
+                amount,
+                "RUB",
+                "",  # MNT_SUBSCRIBER_ID — empty
+                test_mode,
+                self._webhook_secret,
+            )
+            url += f"&MNT_SIGNATURE={sig}"
+
         if self._success_url:
             url += f"&MNT_SUCCESS_URL={quote(self._success_url, safe='')}"
         if self._fail_url:
