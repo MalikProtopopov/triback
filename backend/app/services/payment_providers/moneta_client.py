@@ -75,27 +75,16 @@ class MonetaPaymentProvider(PaymentProvider):
         idempotency_key: str,
         metadata: dict[str, Any] | None = None,
     ) -> CreatePaymentResult:
-        invoice: dict[str, Any] = {
-            "payee": self._payee_account,
-            "amount": float(total_amount),
-            "clientTransaction": transaction_id,
-            "description": description,
-        }
-        body = await self._api_request("InvoiceRequest", invoice)
-        resp = body["InvoiceResponse"]
-        operation_id = str(resp["transaction"])
-
         amount_str = f"{float(total_amount):.2f}"
         payment_url = self._build_payment_url(
-            operation_id,
             transaction_id=transaction_id,
             amount=amount_str,
         )
 
         return CreatePaymentResult(
-            external_id=operation_id,
+            external_id="",
             payment_url=payment_url,
-            raw_response=resp,
+            raw_response={},
         )
 
     async def create_refund(
@@ -222,34 +211,38 @@ class MonetaPaymentProvider(PaymentProvider):
 
     def _build_payment_url(
         self,
-        operation_id: str,
         *,
-        transaction_id: str = "",
-        amount: str = "",
+        transaction_id: str,
+        amount: str,
     ) -> str:
-        base = self._assistant_url
-        url = f"{base}?operationId={operation_id}"
-        if self._form_version:
-            url += f"&version={self._form_version}"
+        """Build Moneta Assistant URL using the standard HTML-form approach.
 
-        if transaction_id and self._webhook_secret:
-            test_mode = "1" if self._demo_mode else "0"
-            url += f"&MNT_ID={self._mnt_id}"
-            url += f"&MNT_TRANSACTION_ID={transaction_id}"
-            url += f"&MNT_AMOUNT={amount}"
-            url += f"&MNT_CURRENCY_CODE=RUB"
-            url += f"&MNT_TEST_MODE={test_mode}"
+        No operationId — Moneta creates the operation itself on form load,
+        then calls Check URL and Pay URL as documented.
+        """
+        base = self._assistant_url
+        test_mode = "1" if self._demo_mode else "0"
+
+        url = f"{base}?MNT_ID={self._mnt_id}"
+        url += f"&MNT_TRANSACTION_ID={transaction_id}"
+        url += f"&MNT_AMOUNT={amount}"
+        url += f"&MNT_CURRENCY_CODE=RUB"
+        url += f"&MNT_TEST_MODE={test_mode}"
+
+        if self._webhook_secret:
             sig = _md5(
                 self._mnt_id,
                 transaction_id,
                 amount,
                 "RUB",
-                "",  # MNT_SUBSCRIBER_ID — empty
+                "",  # MNT_SUBSCRIBER_ID
                 test_mode,
                 self._webhook_secret,
             )
             url += f"&MNT_SIGNATURE={sig}"
 
+        if self._form_version:
+            url += f"&version={self._form_version}"
         if self._success_url:
             url += f"&MNT_SUCCESS_URL={quote(self._success_url, safe='')}"
         if self._fail_url:

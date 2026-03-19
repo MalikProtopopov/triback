@@ -189,12 +189,22 @@ async def moneta_check_webhook(
         logger.info("moneta_check_response_xml", xml=xml)
         return Response(content=xml, media_type="application/xml; charset=utf-8")
 
+    mnt_operation_id = params.get("MNT_OPERATION_ID", "")
+
     try:
         payment_id = UUID(mnt_transaction_id)
-        result = await db.execute(select(Payment).where(Payment.id == payment_id))
+        result = await db.execute(
+            select(Payment).where(Payment.id == payment_id).with_for_update()
+        )
         payment = result.scalar_one_or_none()
     except (ValueError, Exception):
         payment = None
+
+    if payment and mnt_operation_id and not payment.moneta_operation_id:
+        payment.moneta_operation_id = mnt_operation_id
+        if not payment.external_payment_id:
+            payment.external_payment_id = mnt_operation_id
+        await db.commit()
 
     if payment and payment.status == PaymentStatus.PENDING:
         amount_str = f"{float(payment.amount):.2f}"
