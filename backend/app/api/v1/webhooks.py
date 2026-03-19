@@ -193,11 +193,21 @@ async def moneta_check_webhook(
         payment = None
 
     if payment and payment.status == PaymentStatus.PENDING:
+        amount_str = f"{float(payment.amount):.2f}"
         xml = provider.build_check_response(
-            mnt_id, mnt_transaction_id, "200", amount=str(payment.amount)
+            mnt_id, mnt_transaction_id, "402", amount=amount_str
         )
+    elif payment and payment.status == PaymentStatus.SUCCEEDED:
+        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "200")
     else:
-        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "402")
+        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "500")
+
+    logger.info(
+        "moneta_check_response",
+        payment_found=payment is not None,
+        payment_status=payment.status if payment else None,
+        result_code=xml[xml.find("<MNT_RESULT_CODE>") + 17:xml.find("</MNT_RESULT_CODE>")] if "<MNT_RESULT_CODE>" in xml else None,
+    )
 
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
