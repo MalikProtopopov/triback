@@ -60,6 +60,25 @@ class SubscriptionService:
             data = json.loads(cached)
             return PayResponse(**data)
 
+        # Idempotency: если платёж уже есть в БД (кэш истёк), вернуть его
+        existing_result = await self.db.execute(
+            select(Payment).where(
+                Payment.user_id == user_id,
+                Payment.idempotency_key == idempotency_key,
+            )
+        )
+        existing_pay = existing_result.scalar_one_or_none()
+        if existing_pay:
+            resp = PayResponse(
+                payment_id=existing_pay.id,
+                payment_url=existing_pay.external_payment_url or "",
+                amount=float(existing_pay.amount),
+                expires_at=existing_pay.expires_at,
+            )
+            ttl = getattr(settings, "PAYMENT_IDEMPOTENCY_TTL", 86400)
+            await self.redis.set(cache_key, resp.model_dump_json(), ex=ttl)
+            return resp
+
         sub_plan = await self.db.get(Plan, plan_id)
         if not sub_plan or not sub_plan.is_active:
             raise NotFoundError("Plan not found or inactive")
@@ -121,7 +140,28 @@ class SubscriptionService:
             expires_at=datetime.now(UTC) + timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS),
         )
         self.db.add(payment)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            existing_result = await self.db.execute(
+                select(Payment).where(
+                    Payment.user_id == user_id,
+                    Payment.idempotency_key == idempotency_key,
+                )
+            )
+            existing_pay = existing_result.scalar_one_or_none()
+            if existing_pay:
+                resp = PayResponse(
+                    payment_id=existing_pay.id,
+                    payment_url=existing_pay.external_payment_url or "",
+                    amount=float(existing_pay.amount),
+                    expires_at=existing_pay.expires_at,
+                )
+                ttl = getattr(settings, "PAYMENT_IDEMPOTENCY_TTL", 86400)
+                await self.redis.set(cache_key, resp.model_dump_json(), ex=ttl)
+                return resp
+            raise
 
         from app.models.users import User
 
