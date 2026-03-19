@@ -51,6 +51,12 @@ async def start_scheduler() -> None:
             name="sched_expire_payments",
         )
     )
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic("poll_pending_payments", poll_pending_moneta_payments, 30),
+            name="sched_poll_moneta",
+        )
+    )
     logger.info("scheduler_started", tasks=len(_scheduler_tasks))
 
 
@@ -128,6 +134,80 @@ async def deactivate_expired_subscriptions() -> int:
 
     logger.info("deactivate_expired_done", deactivated=deactivated)
     return deactivated
+
+
+@broker.task  # type: ignore[misc]
+async def poll_pending_moneta_payments() -> int:
+    """Every 30s: check pending Moneta payments via API and confirm if paid.
+
+    Only checks payments older than 2 min with a known moneta_operation_id.
+    Acts as fallback when Pay URL webhooks are not delivered (demo mode).
+    """
+    from app.core.config import settings
+    from app.core.database import AsyncSessionLocal
+    from app.models.subscriptions import Payment
+    from app.services.payment_webhook_service import PaymentWebhookService
+
+    if settings.PAYMENT_PROVIDER != "moneta":
+        return 0
+
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=2)
+    confirmed = 0
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Payment).where(
+                and_(
+                    Payment.status == "pending",
+                    Payment.moneta_operation_id.isnot(None),
+                    Payment.created_at < cutoff,
+                    or_(
+                        Payment.expires_at.is_(None),
+                        Payment.expires_at > now,
+                    ),
+                )
+            )
+        )
+        pending = result.scalars().all()
+
+        if not pending:
+            return 0
+
+        from app.services.payment_providers.moneta_client import MonetaPaymentProvider
+
+        provider = MonetaPaymentProvider()
+        confirmed_statuses = {"SUCCEED", "TAKENIN_NOTSENT", "TAKENOUT"}
+
+        for payment in pending:
+            try:
+                op_info = await provider.get_operation_status(
+                    payment.moneta_operation_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "poll_moneta_error",
+                    payment_id=str(payment.id),
+                    error=str(exc),
+                )
+                continue
+
+            moneta_status = op_info.get("status", "unknown")
+            attrs = op_info.get("attributes", {})
+            has_children = str(attrs.get("haschildren", "0")) != "0"
+
+            if moneta_status in confirmed_statuses or has_children:
+                logger.info(
+                    "poll_moneta_confirmed",
+                    payment_id=str(payment.id),
+                    moneta_status=moneta_status,
+                )
+                svc = PaymentWebhookService(db)
+                await svc.handle_moneta_payment_succeeded(payment)
+                confirmed += 1
+
+    logger.info("poll_pending_moneta_done", checked=len(pending), confirmed=confirmed)
+    return confirmed
 
 
 @broker.task  # type: ignore[misc]

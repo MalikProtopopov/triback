@@ -200,11 +200,10 @@ class SubscriptionService:
                 details={"provider": settings.PAYMENT_PROVIDER},
             ) from exc
 
-        if result.external_id:
-            payment.external_payment_id = result.external_id
-            if settings.PAYMENT_PROVIDER == "moneta":
-                payment.moneta_operation_id = result.external_id
+        payment.external_payment_id = result.external_id or None
         payment.external_payment_url = result.payment_url
+        if settings.PAYMENT_PROVIDER == "moneta" and result.external_id:
+            payment.moneta_operation_id = result.external_id
 
         await self.db.commit()
 

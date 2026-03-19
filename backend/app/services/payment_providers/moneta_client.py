@@ -75,6 +75,16 @@ class MonetaPaymentProvider(PaymentProvider):
         idempotency_key: str,
         metadata: dict[str, Any] | None = None,
     ) -> CreatePaymentResult:
+        invoice: dict[str, Any] = {
+            "payee": self._payee_account,
+            "amount": float(total_amount),
+            "clientTransaction": transaction_id,
+            "description": description,
+        }
+        body = await self._api_request("InvoiceRequest", invoice)
+        resp = body["InvoiceResponse"]
+        operation_id = str(resp["transaction"])
+
         amount_str = f"{float(total_amount):.2f}"
         payment_url = self._build_payment_url(
             transaction_id=transaction_id,
@@ -82,9 +92,9 @@ class MonetaPaymentProvider(PaymentProvider):
         )
 
         return CreatePaymentResult(
-            external_id="",
+            external_id=operation_id,
             payment_url=payment_url,
-            raw_response={},
+            raw_response=resp,
         )
 
     async def create_refund(
