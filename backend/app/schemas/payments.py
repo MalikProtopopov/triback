@@ -88,6 +88,34 @@ class RefundResponse(BaseModel):
     }}
 
 
+# ── Admin cancel ──────────────────────────────────────────────────
+
+class CancelPaymentRequest(BaseModel):
+    reason: str = Field(max_length=500, description="Причина отмены платежа")
+
+    model_config = {"json_schema_extra": {
+        "example": {"reason": "Клиент запросил отмену, создаст новый платёж"}
+    }}
+
+
+class CancelPaymentResponse(BaseModel):
+    payment_id: UUID
+    status: str
+    cancelled_subscription: bool = False
+    cancelled_event_registration: bool = False
+    message: str
+
+    model_config = {"json_schema_extra": {
+        "example": {
+            "payment_id": "2da5c87d-000f-5000-8000-1a2b3c4d5e6f",
+            "status": "failed",
+            "cancelled_subscription": True,
+            "cancelled_event_registration": False,
+            "message": "Платёж отменён. Пользователь может создать новый платёж.",
+        }
+    }}
+
+
 # ── Webhook ───────────────────────────────────────────────────────
 
 class WebhookPayload(BaseModel):

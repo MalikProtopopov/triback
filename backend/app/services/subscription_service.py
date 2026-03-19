@@ -399,3 +399,6 @@ class SubscriptionService:
 
     async def initiate_refund(self, payment_id: UUID, amount: float | None, reason: str) -> dict[str, Any]:
         return await self._admin.initiate_refund(payment_id, amount, reason)
+
+    async def cancel_payment(self, payment_id: UUID, reason: str) -> dict[str, Any]:
+        return await self._admin.cancel_payment(payment_id, reason)

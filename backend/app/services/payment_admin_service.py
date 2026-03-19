@@ -189,6 +189,63 @@ class PaymentAdminService:
             payment_provider="manual",
         )
 
+    async def cancel_payment(
+        self,
+        payment_id: UUID,
+        reason: str,
+    ) -> dict[str, Any]:
+        from app.schemas.payments import CancelPaymentResponse
+
+        payment = await self.db.get(Payment, payment_id)
+        if not payment:
+            raise NotFoundError("Payment not found")
+
+        if payment.status != PaymentStatus.PENDING:
+            raise AppValidationError(
+                f"Можно отменить только платёж в статусе 'pending'. "
+                f"Текущий статус: '{payment.status}'"
+            )
+
+        payment.status = PaymentStatus.FAILED  # type: ignore[assignment]
+        payment.description = (
+            f"{payment.description or ''} | Отменён администратором: {reason}"
+        ).strip(" |")
+
+        cancelled_subscription = False
+        cancelled_event_registration = False
+
+        if payment.subscription_id:
+            from app.models.subscriptions import Subscription
+            from app.core.enums import SubscriptionStatus
+
+            sub = await self.db.get(Subscription, payment.subscription_id)
+            if sub and sub.status == SubscriptionStatus.PENDING_PAYMENT:
+                sub.status = SubscriptionStatus.CANCELLED  # type: ignore[assignment]
+                cancelled_subscription = True
+
+        if payment.event_registration_id:
+            webhook_svc = PaymentWebhookService(self.db)
+            await webhook_svc._cancel_event_registration(payment)
+            cancelled_event_registration = True
+
+        await self.db.commit()
+
+        logger.info(
+            "payment_cancelled_by_admin",
+            payment_id=str(payment_id),
+            reason=reason,
+            cancelled_subscription=cancelled_subscription,
+            cancelled_event_registration=cancelled_event_registration,
+        )
+
+        return CancelPaymentResponse(
+            payment_id=payment.id,
+            status=PaymentStatus.FAILED,
+            cancelled_subscription=cancelled_subscription,
+            cancelled_event_registration=cancelled_event_registration,
+            message="Платёж отменён. Пользователь может создать новый платёж.",
+        ).model_dump()
+
     async def initiate_refund(
         self,
         payment_id: UUID,

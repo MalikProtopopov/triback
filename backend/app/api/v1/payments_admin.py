@@ -13,6 +13,8 @@ from app.core.openapi import error_responses
 from app.core.redis import get_redis
 from app.core.security import require_role
 from app.schemas.payments import (
+    CancelPaymentRequest,
+    CancelPaymentResponse,
     ManualPaymentRequest,
     ManualPaymentResponse,
     PaymentListResponse,
@@ -89,6 +91,32 @@ async def create_manual_payment(
     admin_id = UUID(payload["sub"])
     svc = SubscriptionService(db, redis)
     return await svc.create_manual_payment(admin_id, body)
+
+
+@router.post(
+    "/payments/{payment_id}/cancel",
+    response_model=CancelPaymentResponse,
+    summary="Отмена платежа",
+    responses=error_responses(401, 403, 404, 422),
+)
+async def cancel_payment(
+    payment_id: UUID,
+    body: CancelPaymentRequest,
+    payload: dict[str, Any] = ADMIN_ACCOUNTANT,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> dict:
+    """Отменяет pending-платёж. Связанная подписка или регистрация
+    на мероприятие также отменяются. После отмены пользователь
+    может создать новый платёж.
+
+    - **401** — не авторизован
+    - **403** — роль не admin/accountant
+    - **404** — платёж не найден
+    - **422** — платёж нельзя отменить (статус не pending)
+    """
+    svc = SubscriptionService(db, redis)
+    return await svc.cancel_payment(payment_id, body.reason)
 
 
 @router.post(
