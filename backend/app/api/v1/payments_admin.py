@@ -121,7 +121,7 @@ async def cancel_payment(
 
 @router.post(
     "/payments/{payment_id}/confirm",
-    summary="[DEV] Ручное подтверждение оплаты",
+    summary="Ручное подтверждение платежа (dev/test)",
     responses=error_responses(401, 403, 404, 422),
 )
 async def confirm_payment(
@@ -130,10 +130,10 @@ async def confirm_payment(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
 ) -> dict:
-    """Принудительно подтверждает pending-платёж — активирует подписку.
+    """Принудительно подтверждает pending-платёж и активирует подписку.
 
     Временный endpoint для тестирования, пока Moneta demo не завершает
-    операции. Удалить после перехода на production.
+    оплату реально. Убрать перед выходом в production.
     """
     from app.core.enums import PaymentStatus
     from app.core.exceptions import AppValidationError, NotFoundError
@@ -145,7 +145,7 @@ async def confirm_payment(
         raise NotFoundError("Payment not found")
     if payment.status != PaymentStatus.PENDING:
         raise AppValidationError(
-            f"Можно подтвердить только pending-платёж. Текущий: '{payment.status}'"
+            f"Можно подтвердить только pending-платёж. Текущий статус: '{payment.status}'"
         )
 
     svc = PaymentWebhookService(db)

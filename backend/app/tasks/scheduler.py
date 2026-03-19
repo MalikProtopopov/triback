@@ -205,6 +205,23 @@ async def poll_pending_moneta_payments() -> int:
                 svc = PaymentWebhookService(db)
                 await svc.handle_moneta_payment_succeeded(payment)
                 confirmed += 1
+            elif moneta_status in {"CANCELED", "REVERSED"}:
+                logger.info(
+                    "poll_moneta_canceled",
+                    payment_id=str(payment.id),
+                    moneta_status=moneta_status,
+                )
+                payment.status = "failed"  # type: ignore[assignment]
+                payment.description = (
+                    f"{payment.description or ''} | Отменено Moneta: {moneta_status}"
+                ).strip(" |")
+                from app.models.subscriptions import Subscription
+
+                if payment.subscription_id:
+                    sub = await db.get(Subscription, payment.subscription_id)
+                    if sub and sub.status == "pending_payment":
+                        sub.status = "cancelled"  # type: ignore[assignment]
+                await db.commit()
 
     logger.info("poll_pending_moneta_done", checked=len(pending), confirmed=confirmed)
     return confirmed
