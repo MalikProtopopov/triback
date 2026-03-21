@@ -508,20 +508,21 @@ def _generate_member_pdf(
     stamp_size = 100
     sig_w, sig_h = 110, 35
 
-    if stamp_img:
-        c.drawImage(
-            stamp_img,
-            right_block_x, bottom_y + 20,
-            width=stamp_size, height=stamp_size,
-            mask="auto",
-            preserveAspectRatio=True,
-        )
-
+    # Draw signature first, then stamp on top (correct real-world order)
     if sig_img:
         c.drawImage(
             sig_img,
             right_block_x + stamp_size - 15, bottom_y + 45,
             width=sig_w, height=sig_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+
+    if stamp_img:
+        c.drawImage(
+            stamp_img,
+            right_block_x, bottom_y + 20,
+            width=stamp_size, height=stamp_size,
             mask="auto",
             preserveAspectRatio=True,
         )
