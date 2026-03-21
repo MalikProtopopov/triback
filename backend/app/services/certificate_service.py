@@ -368,14 +368,15 @@ def _draw_border(c: canvas.Canvas, width: float, height: float) -> None:
     brown = HexColor("#6B4226")
     c.setStrokeColor(brown)
 
+    m = 40
     c.setLineWidth(3)
-    c.rect(25, 25, width - 50, height - 50)
+    c.rect(m, m, width - 2 * m, height - 2 * m)
 
     c.setLineWidth(1.5)
-    c.rect(32, 32, width - 64, height - 64)
+    c.rect(m + 7, m + 7, width - 2 * (m + 7), height - 2 * (m + 7))
 
     c.setLineWidth(0.5)
-    c.rect(37, 37, width - 74, height - 74)
+    c.rect(m + 12, m + 12, width - 2 * (m + 12), height - 2 * (m + 12))
 
 
 def _wrap_text(text: str, max_width: float, font_name: str, font_size: float) -> list[str]:
@@ -422,27 +423,32 @@ def _generate_member_pdf(
 
     _draw_border(c, width, height)
 
-    # Background watermark
+    content_margin = 70
+    max_text_width = width - 2 * content_margin
+
+    # Background watermark — lower half of the page, large
     bg_img = _bytes_to_image_reader(background_bytes)
     if bg_img:
         c.saveState()
         c.setFillAlpha(0.08)
-        bg_w, bg_h = 400, 250
+        bg_w = width - 2 * content_margin
+        bg_h = height * 0.45
+        bg_x = (width - bg_w) / 2
+        bg_y = height * 0.18
         c.drawImage(
-            bg_img,
-            (width - bg_w) / 2, (height - bg_h) / 2 - 30,
+            bg_img, bg_x, bg_y,
             width=bg_w, height=bg_h,
             mask="auto",
             preserveAspectRatio=True,
         )
         c.restoreState()
 
-    y_cursor = height - 70
+    y_cursor = height - 90
 
     # Logo
     logo_img = _bytes_to_image_reader(logo_bytes)
     if logo_img:
-        logo_w, logo_h = 90, 90
+        logo_w, logo_h = 95, 95
         c.drawImage(
             logo_img,
             (width - logo_w) / 2, y_cursor - logo_h,
@@ -450,89 +456,89 @@ def _generate_member_pdf(
             mask="auto",
             preserveAspectRatio=True,
         )
-        y_cursor -= logo_h + 15
+        y_cursor -= logo_h + 25
     else:
         y_cursor -= 20
 
     # "СЕРТИФИКАТ" heading
-    dark_brown = HexColor("#5C3A1E")
-    c.setFont(italic, 32)
-    c.setFillColor(dark_brown)
+    heading_color = HexColor("#2c2c2c")
+    c.setFont(italic, 30)
+    c.setFillColor(heading_color)
     c.drawCentredString(width / 2, y_cursor, "СЕРТИФИКАТ")
     y_cursor -= 45
 
     # Doctor full name
-    c.setFont(bold, 22)
+    c.setFont(bold, 20)
     c.setFillColor(HexColor("#1a1a1a"))
-    name_lines = _wrap_text(full_name, width - 120, bold, 22)
+    name_lines = _wrap_text(full_name, max_text_width, bold, 20)
     for line in name_lines:
         c.drawCentredString(width / 2, y_cursor, line)
-        y_cursor -= 30
-    y_cursor -= 10
+        y_cursor -= 28
+    y_cursor -= 35
 
-    # Body text (multi-line, centered)
-    text_color = HexColor("#333333")
-    c.setFont(regular, 11)
-    c.setFillColor(text_color)
-    max_text_width = width - 120
-    body_lines = _wrap_text(body_text, max_text_width, regular, 11)
+    # Body text — uppercase, centered
+    c.setFont(regular, 10)
+    c.setFillColor(HexColor("#333333"))
+    body_upper = body_text.upper()
+    body_lines = _wrap_text(body_upper, max_text_width, regular, 10)
     for line in body_lines:
         c.drawCentredString(width / 2, y_cursor, line)
-        y_cursor -= 16
-    y_cursor -= 10
+        y_cursor -= 14
+    y_cursor -= 30
 
     # Validity text
     if validity_text:
-        c.setFont(bold, 13)
-        c.setFillColor(dark_brown)
-        c.drawCentredString(width / 2, y_cursor, validity_text)
-        y_cursor -= 30
+        c.setFont(regular, 11)
+        c.setFillColor(HexColor("#666666"))
+        c.drawCentredString(width / 2, y_cursor, validity_text.upper())
+        y_cursor -= 40
 
-    # Bottom section: QR left, stamp+signature right
-    bottom_y = 60
-    margin_x = 55
+    # Bottom section
+    bottom_y = 80
+    margin_x = 65
 
     # QR code — bottom left
     qr_img = _generate_qr_image(qr_url, box_size=5)
     qr_size = 85
-    c.drawImage(qr_img, margin_x, bottom_y, width=qr_size, height=qr_size, mask="auto")
     c.setFont(regular, 7)
     c.setFillColor(HexColor("#888888"))
-    c.drawString(margin_x, bottom_y - 10, "проверить сертификат")
+    c.drawString(margin_x, bottom_y + qr_size + 6, "проверить сертификат")
+    c.drawImage(qr_img, margin_x, bottom_y, width=qr_size, height=qr_size, mask="auto")
 
     # Stamp + Signature — bottom right
-    right_block_x = width - margin_x - 180
+    right_block_x = width - margin_x - 190
     stamp_img = _bytes_to_image_reader(stamp_bytes)
     sig_img = _bytes_to_image_reader(signature_bytes)
 
+    stamp_size = 100
+    sig_w, sig_h = 110, 35
+
     if stamp_img:
-        stamp_size = 100
         c.drawImage(
             stamp_img,
-            right_block_x, bottom_y + 15,
+            right_block_x, bottom_y + 20,
             width=stamp_size, height=stamp_size,
             mask="auto",
             preserveAspectRatio=True,
         )
 
     if sig_img:
-        sig_w, sig_h = 120, 40
         c.drawImage(
             sig_img,
-            right_block_x + 60, bottom_y + 55,
+            right_block_x + stamp_size - 15, bottom_y + 45,
             width=sig_w, height=sig_h,
             mask="auto",
             preserveAspectRatio=True,
         )
 
-    # President info text — bottom right
+    # President info text — below stamp/signature
     c.setFont(regular, 9)
     c.setFillColor(HexColor("#333333"))
-    pres_x = right_block_x + 10
+    pres_x = right_block_x + 15
     if president_title:
-        c.drawString(pres_x, bottom_y + 5, president_title)
+        c.drawString(pres_x, bottom_y + 8, president_title)
     if president_name:
-        c.drawString(pres_x, bottom_y - 8, president_name)
+        c.drawString(pres_x, bottom_y - 5, president_name)
 
     c.save()
     return buf.getvalue()
