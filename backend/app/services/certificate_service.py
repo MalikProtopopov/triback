@@ -425,7 +425,7 @@ def _generate_member_pdf(
     bg_img = _bytes_to_image_reader(background_bytes)
     if bg_img:
         c.saveState()
-        c.setFillAlpha(0.07)
+        c.setFillAlpha(0.18)
         c.drawImage(
             bg_img, 0, 0,
             width=width, height=height,
