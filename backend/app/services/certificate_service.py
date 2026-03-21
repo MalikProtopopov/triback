@@ -95,7 +95,7 @@ class CertificateService:
                 if evt:
                     event_nested = {"id": str(evt.id), "title": evt.title}
 
-            download_url = await file_service.get_presigned_url(cert.file_url, ttl=3600)
+            download_url = f"/api/v1/certificates/{cert.id}/download"
             verify_url = f"{qr_base.rstrip('/')}/certificates/verify/{cert.certificate_number}"
 
             items.append({
@@ -112,7 +112,10 @@ class CertificateService:
 
         return items
 
-    async def download_certificate(self, user_id: str, cert_id: UUID) -> str:
+    async def get_certificate_pdf_bytes(
+        self, user_id: str, cert_id: UUID
+    ) -> tuple[bytes, str]:
+        """Fetch the PDF from S3 and return (pdf_bytes, filename)."""
         await self._get_active_profile(user_id)
 
         cert = await self.db.get(Certificate, cert_id)
@@ -120,8 +123,13 @@ class CertificateService:
             raise NotFoundError("Certificate not found")
         if not cert.is_active:
             raise ForbiddenError("Certificate is no longer active")
+        if not cert.file_url:
+            raise NotFoundError("Certificate file not found in storage")
 
-        return await file_service.get_presigned_url(cert.file_url, ttl=600)
+        data = await self._download_s3_bytes(cert.file_url)
+        if not data:
+            raise NotFoundError("Certificate file not found in storage")
+        return data, f"{cert.certificate_number}.pdf"
 
     # ------------------------------------------------------------------
     # Generation

@@ -3,8 +3,8 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -39,21 +39,30 @@ async def list_certificates(
     "/{certificate_id}/download",
     summary="Скачать сертификат",
     responses={
-        302: {"description": "Redirect на presigned S3 URL"},
+        200: {"content": {"application/pdf": {}}, "description": "PDF файл сертификата"},
         **error_responses(401, 403, 404),
     },
 )
 async def download_certificate(
     certificate_id: UUID,
+    disposition: str = Query("inline", pattern="^(inline|attachment)$"),
     payload: dict[str, Any] = require_role("doctor"),
     db: AsyncSession = Depends(get_db_session),
-) -> RedirectResponse:
-    """Генерирует presigned URL и перенаправляет на скачивание PDF.
+) -> Response:
+    """Возвращает PDF-файл сертификата.
 
     - **401** — не авторизован
-    - **403** — сертификат принадлежит другому врачу
+    - **403** — сертификат принадлежит другому врачу или неактивен
     - **404** — сертификат не найден
     """
     svc = CertificateService(db)
-    url = await svc.download_certificate(payload["sub"], certificate_id)
-    return RedirectResponse(url=url, status_code=302)
+    data, filename = await svc.get_certificate_pdf_bytes(
+        payload["sub"], certificate_id
+    )
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{filename}"',
+        },
+    )

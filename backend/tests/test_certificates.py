@@ -92,15 +92,13 @@ class TestClientCertificates:
         resp = await client.get("/api/v1/certificates", headers=headers)
         assert resp.status_code == 403
 
-    @patch("app.services.certificate_service.file_service")
     async def test_list_with_active_sub(
-        self, mock_fs, client: AsyncClient, db_session: AsyncSession, doctor_user
+        self, client: AsyncClient, db_session: AsyncSession, doctor_user
     ):
-        mock_fs.get_presigned_url = AsyncMock(return_value="https://s3/cert.pdf")
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
         plan = await create_plan(db_session)
         await create_subscription(db_session, user=doctor_user, plan=plan, status="active")
-        await _create_certificate(db_session, user=doctor_user, profile=profile)
+        cert = await _create_certificate(db_session, user=doctor_user, profile=profile)
 
         headers = _make_auth_headers(doctor_user.id, "doctor")
         resp = await client.get("/api/v1/certificates", headers=headers)
@@ -110,12 +108,11 @@ class TestClientCertificates:
         assert data[0]["certificate_type"] == "member"
         assert "verify_url" in data[0]
         assert "/certificates/verify/" in data[0]["verify_url"]
+        assert data[0]["download_url"] == f"/api/v1/certificates/{cert.id}/download"
 
-    @patch("app.services.certificate_service.file_service")
     async def test_member_cert_hidden_without_active_sub(
-        self, mock_fs, client: AsyncClient, db_session: AsyncSession, doctor_user
+        self, client: AsyncClient, db_session: AsyncSession, doctor_user
     ):
-        mock_fs.get_presigned_url = AsyncMock(return_value="https://s3/cert.pdf")
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
         plan = await create_plan(db_session)
         await create_subscription(db_session, user=doctor_user, plan=plan, status="expired")
@@ -126,11 +123,9 @@ class TestClientCertificates:
         assert resp.status_code == 200
         assert len(resp.json()) == 0
 
-    @patch("app.services.certificate_service.file_service")
     async def test_event_cert_visible_without_sub(
-        self, mock_fs, client: AsyncClient, db_session: AsyncSession, doctor_user, admin_user
+        self, client: AsyncClient, db_session: AsyncSession, doctor_user, admin_user
     ):
-        mock_fs.get_presigned_url = AsyncMock(return_value="https://s3/cert.pdf")
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
         plan = await create_plan(db_session)
         await create_subscription(db_session, user=doctor_user, plan=plan, status="expired")
@@ -150,7 +145,18 @@ class TestClientCertificates:
     async def test_download_active_certificate(
         self, mock_fs, client: AsyncClient, db_session: AsyncSession, doctor_user
     ):
-        mock_fs.get_presigned_url = AsyncMock(return_value="https://s3/cert.pdf")
+        mock_s3_client = AsyncMock()
+        mock_s3_client.get_object.return_value = {
+            "Body": AsyncMock(read=AsyncMock(return_value=b"%PDF-fake-content"))
+        }
+        mock_s3_session = MagicMock()
+        mock_s3_session.client.return_value.__aenter__ = AsyncMock(return_value=mock_s3_client)
+        mock_s3_session.client.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_fs._get_s3_session.return_value = mock_s3_session
+        mock_fs._s3_client_kwargs.return_value = {"service_name": "s3"}
+        mock_fs.settings = MagicMock()
+        mock_fs.settings.S3_BUCKET = "test-bucket"
+
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
         cert = await _create_certificate(db_session, user=doctor_user, profile=profile)
         plan = await create_plan(db_session)
@@ -160,15 +166,18 @@ class TestClientCertificates:
         resp = await client.get(
             f"/api/v1/certificates/{cert.id}/download",
             headers=headers,
-            follow_redirects=False,
         )
-        assert resp.status_code == 302
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/pdf"
+        assert b"%PDF-" in resp.content
 
     @patch("app.services.certificate_service.file_service")
     async def test_download_inactive_certificate_returns_403(
         self, mock_fs, client: AsyncClient, db_session: AsyncSession, doctor_user
     ):
-        mock_fs.get_presigned_url = AsyncMock(return_value="https://s3/cert.pdf")
+        mock_fs._get_s3_session = MagicMock()
+        mock_fs._s3_client_kwargs = MagicMock()
+        mock_fs.settings = MagicMock()
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
         cert = await _create_certificate(
             db_session, user=doctor_user, profile=profile, is_active=False
@@ -178,7 +187,6 @@ class TestClientCertificates:
         resp = await client.get(
             f"/api/v1/certificates/{cert.id}/download",
             headers=headers,
-            follow_redirects=False,
         )
         assert resp.status_code == 403
 
@@ -417,14 +425,12 @@ class TestAdminCertificateSettings:
 
 class TestAdminCertificateManagement:
 
-    @patch("app.services.certificate_service.file_service")
     async def test_list_doctor_certificates(
-        self, mock_fs, client: AsyncClient, db_session: AsyncSession,
+        self, client: AsyncClient, db_session: AsyncSession,
         admin_user, doctor_user
     ):
-        mock_fs.get_presigned_url = AsyncMock(return_value="https://s3/cert.pdf")
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
-        await _create_certificate(db_session, user=doctor_user, profile=profile)
+        cert = await _create_certificate(db_session, user=doctor_user, profile=profile)
 
         headers = _make_auth_headers(admin_user.id, "admin")
         resp = await client.get(
@@ -435,6 +441,7 @@ class TestAdminCertificateManagement:
         data = resp.json()
         assert len(data) == 1
         assert data[0]["certificate_type"] == "member"
+        assert data[0]["download_url"] == f"/api/v1/admin/certificates/{cert.id}/download"
 
     async def test_list_doctor_certs_nonexistent_doctor(
         self, client: AsyncClient, auth_headers_admin
@@ -445,14 +452,10 @@ class TestAdminCertificateManagement:
         )
         assert resp.status_code == 404
 
-    @patch("app.api.v1.certificates_admin.file_service")
     async def test_toggle_certificate_active(
-        self, mock_fs, client: AsyncClient, db_session: AsyncSession,
+        self, client: AsyncClient, db_session: AsyncSession,
         admin_user, doctor_user
     ):
-        mock_fs.get_presigned_url = AsyncMock(return_value="https://s3/cert.pdf")
-        mock_fs.settings = MagicMock()
-        mock_fs.settings.S3_BUCKET = "test"
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
         cert = await _create_certificate(db_session, user=doctor_user, profile=profile)
 
@@ -464,6 +467,7 @@ class TestAdminCertificateManagement:
         )
         assert resp.status_code == 200
         assert resp.json()["is_active"] is False
+        assert resp.json()["download_url"] == f"/api/v1/admin/certificates/{cert.id}/download"
 
     async def test_toggle_nonexistent_cert(self, client: AsyncClient, auth_headers_admin):
         resp = await client.patch(

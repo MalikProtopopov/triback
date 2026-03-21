@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,7 +155,6 @@ async def list_doctor_certificates(
 
     items = []
     for cert in certs:
-        download_url = await file_service.get_presigned_url(cert.file_url, ttl=600)
         items.append({
             "id": str(cert.id),
             "certificate_type": cert.certificate_type,
@@ -163,7 +162,7 @@ async def list_doctor_certificates(
             "certificate_number": cert.certificate_number,
             "is_active": cert.is_active,
             "generated_at": cert.generated_at.isoformat(),
-            "download_url": download_url,
+            "download_url": f"/api/v1/admin/certificates/{cert.id}/download",
         })
     return items
 
@@ -172,7 +171,7 @@ async def list_doctor_certificates(
     "/certificates/{certificate_id}/download",
     summary="Скачать/предпросмотр сертификата",
     responses={
-        302: {"description": "Redirect на presigned S3 URL"},
+        200: {"content": {"application/pdf": {}}, "description": "PDF файл сертификата"},
         **error_responses(401, 403, 404),
     },
 )
@@ -181,24 +180,31 @@ async def admin_download_certificate(
     disposition: str = Query("inline", pattern="^(inline|attachment)$"),
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
-) -> RedirectResponse:
+) -> Response:
     cert = await db.get(Certificate, certificate_id)
     if not cert:
         from app.core.exceptions import NotFoundError
         raise NotFoundError("Certificate not found")
 
-    params = {"Bucket": file_service.settings.S3_BUCKET, "Key": cert.file_url}
-    if disposition == "attachment":
-        params["ResponseContentDisposition"] = (
-            f'attachment; filename="{cert.certificate_number}.pdf"'
-        )
+    if not cert.file_url:
+        from app.core.exceptions import NotFoundError
+        raise NotFoundError("Certificate file not found in storage")
 
     session = file_service._get_s3_session()
     async with session.client(**file_service._s3_client_kwargs()) as s3:
-        url: str = await s3.generate_presigned_url(
-            "get_object", Params=params, ExpiresIn=600
+        resp = await s3.get_object(
+            Bucket=file_service.settings.S3_BUCKET, Key=cert.file_url
         )
-    return RedirectResponse(url=url, status_code=302)
+        data: bytes = await resp["Body"].read()
+
+    filename = f"{cert.certificate_number}.pdf"
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{filename}"',
+        },
+    )
 
 
 @router.post(
@@ -225,7 +231,6 @@ async def regenerate_doctor_certificate(
     from app.services.certificate_service import CertificateService
     svc = CertificateService(db)
     cert = await svc.generate_membership_certificate(doctor_id, year)
-    download_url = await file_service.get_presigned_url(cert.file_url, ttl=600)
     return {
         "id": str(cert.id),
         "certificate_type": cert.certificate_type,
@@ -233,7 +238,7 @@ async def regenerate_doctor_certificate(
         "certificate_number": cert.certificate_number,
         "is_active": cert.is_active,
         "generated_at": cert.generated_at.isoformat(),
-        "download_url": download_url,
+        "download_url": f"/api/v1/admin/certificates/{cert.id}/download",
     }
 
 
@@ -258,7 +263,6 @@ async def update_certificate(
 
     await db.commit()
     await db.refresh(cert)
-    download_url = await file_service.get_presigned_url(cert.file_url, ttl=600)
     return {
         "id": str(cert.id),
         "certificate_type": cert.certificate_type,
@@ -266,7 +270,7 @@ async def update_certificate(
         "certificate_number": cert.certificate_number,
         "is_active": cert.is_active,
         "generated_at": cert.generated_at.isoformat(),
-        "download_url": download_url,
+        "download_url": f"/api/v1/admin/certificates/{cert.id}/download",
     }
 
 
