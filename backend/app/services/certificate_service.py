@@ -421,27 +421,22 @@ def _generate_member_pdf(
     c = canvas.Canvas(buf, pagesize=A4)
     width, height = A4
 
+    # Background watermark — draw BEFORE border so edges are hidden
+    bg_img = _bytes_to_image_reader(background_bytes)
+    if bg_img:
+        c.saveState()
+        c.setFillAlpha(0.07)
+        c.drawImage(
+            bg_img, 0, 0,
+            width=width, height=height,
+            mask="auto",
+        )
+        c.restoreState()
+
     _draw_border(c, width, height)
 
     content_margin = 70
     max_text_width = width - 2 * content_margin
-
-    # Background watermark — lower half of the page, large
-    bg_img = _bytes_to_image_reader(background_bytes)
-    if bg_img:
-        c.saveState()
-        c.setFillAlpha(0.08)
-        bg_w = width - 2 * content_margin
-        bg_h = height * 0.45
-        bg_x = (width - bg_w) / 2
-        bg_y = height * 0.18
-        c.drawImage(
-            bg_img, bg_x, bg_y,
-            width=bg_w, height=bg_h,
-            mask="auto",
-            preserveAspectRatio=True,
-        )
-        c.restoreState()
 
     y_cursor = height - 90
 
