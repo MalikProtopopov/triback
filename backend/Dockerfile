@@ -16,7 +16,7 @@ RUN poetry export --without dev -f requirements.txt -o requirements.txt \
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl fonts-dejavu-core \
+    curl fonts-dejavu-core fonts-dejavu-extra \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv

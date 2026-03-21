@@ -282,7 +282,8 @@ class CertificateService:
 # PDF Generation
 # ======================================================================
 
-def _register_cyrillic_fonts() -> bool:
+def _register_cyrillic_fonts() -> tuple[str, str, str] | None:
+    """Try to register DejaVu fonts and return (regular, bold, italic) names."""
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
@@ -292,42 +293,49 @@ def _register_cyrillic_fonts() -> bool:
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/usr/local/share/fonts/DejaVuSans.ttf",
     ]
-    bold_paths = [p.replace("DejaVuSans.ttf", "DejaVuSans-Bold.ttf") for p in font_paths]
-    italic_paths = [p.replace("DejaVuSans.ttf", "DejaVuSans-Oblique.ttf") for p in font_paths]
 
     import os
 
-    registered = False
+    regular_path = None
     for path in font_paths:
         if os.path.exists(path):
-            pdfmetrics.registerFont(TTFont("DejaVuSans", path))
-            registered = True
+            regular_path = path
             break
 
-    if registered:
-        for bp in bold_paths:
-            if os.path.exists(bp):
-                pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bp))
-                break
-        for ip in italic_paths:
-            if os.path.exists(ip):
-                pdfmetrics.registerFont(TTFont("DejaVuSans-Oblique", ip))
-                break
+    if not regular_path:
+        return None
 
-    return registered
+    pdfmetrics.registerFont(TTFont("DejaVuSans", regular_path))
+    regular = "DejaVuSans"
+    bold = regular
+    italic = regular
+
+    bold_path = regular_path.replace("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
+    if os.path.exists(bold_path):
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
+        bold = "DejaVuSans-Bold"
+
+    oblique_path = regular_path.replace("DejaVuSans.ttf", "DejaVuSans-Oblique.ttf")
+    if os.path.exists(oblique_path):
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Oblique", oblique_path))
+        italic = "DejaVuSans-Oblique"
+
+    return regular, bold, italic
 
 
-_CYRILLIC_READY: bool | None = None
+_CYRILLIC_FONTS: tuple[str, str, str] | None = None
 
 
 def _ensure_fonts() -> tuple[str, str, str]:
     """Return (regular, bold, italic) font names."""
-    global _CYRILLIC_READY  # noqa: PLW0603
-    if _CYRILLIC_READY is None:
-        _CYRILLIC_READY = _register_cyrillic_fonts()
-    if _CYRILLIC_READY:
-        return ("DejaVuSans", "DejaVuSans-Bold", "DejaVuSans-Oblique")
-    return ("Helvetica", "Helvetica-Bold", "Helvetica-Oblique")
+    global _CYRILLIC_FONTS  # noqa: PLW0603
+    if _CYRILLIC_FONTS is None:
+        result = _register_cyrillic_fonts()
+        if result:
+            _CYRILLIC_FONTS = result
+        else:
+            _CYRILLIC_FONTS = ("Helvetica", "Helvetica-Bold", "Helvetica-Oblique")
+    return _CYRILLIC_FONTS
 
 
 def _bytes_to_image_reader(data: bytes | None) -> ImageReader | None:
