@@ -57,6 +57,14 @@ async def start_scheduler() -> None:
             name="sched_poll_moneta",
         )
     )
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic(
+                "deactivate_certs", deactivate_expired_certificates, 86400
+            ),
+            name="sched_deactivate_certs",
+        )
+    )
     logger.info("scheduler_started", tasks=len(_scheduler_tasks))
 
 
@@ -113,9 +121,13 @@ async def deactivate_expired_subscriptions() -> int:
         )
         expired_subs = result.scalars().all()
 
+        from app.models.certificates import Certificate
+
+        expired_user_ids = []
         for sub in expired_subs:
             sub.status = "expired"  # type: ignore[assignment]
             deactivated += 1
+            expired_user_ids.append(sub.user_id)
 
             binding_result = await db.execute(
                 select(TelegramBinding).where(
@@ -129,6 +141,19 @@ async def deactivate_expired_subscriptions() -> int:
             if binding and binding.tg_user_id:
                 await remove_user_from_channel.kiq(binding.tg_user_id)
                 binding.is_in_channel = False
+
+        if expired_user_ids:
+            certs_result = await db.execute(
+                select(Certificate).where(
+                    and_(
+                        Certificate.user_id.in_(expired_user_ids),
+                        Certificate.certificate_type == "member",
+                        Certificate.is_active.is_(True),
+                    )
+                )
+            )
+            for cert in certs_result.scalars().all():
+                cert.is_active = False
 
         await db.commit()
 
@@ -273,3 +298,53 @@ async def expire_stale_pending_payments() -> int:
 
     logger.info("expire_stale_payments_done", expired=expired_count)
     return expired_count
+
+
+@broker.task  # type: ignore[misc]
+async def deactivate_expired_certificates() -> int:
+    """Daily: deactivate member certificates whose owners have no active subscription.
+
+    Catches certificates that were missed by the inline deactivation in
+    ``deactivate_expired_subscriptions`` (e.g. manual subscription changes).
+    """
+    from app.core.database import AsyncSessionLocal
+    from app.models.certificates import Certificate
+    from app.models.subscriptions import Subscription
+
+    now = datetime.now(UTC)
+    deactivated = 0
+
+    async with AsyncSessionLocal() as db:
+        active_sub_user_ids = (
+            select(Subscription.user_id)
+            .where(
+                and_(
+                    Subscription.status == "active",
+                    or_(
+                        Subscription.ends_at.is_(None),
+                        Subscription.ends_at > now,
+                    ),
+                )
+            )
+            .correlate(None)
+        )
+
+        result = await db.execute(
+            select(Certificate).where(
+                and_(
+                    Certificate.certificate_type == "member",
+                    Certificate.is_active.is_(True),
+                    Certificate.user_id.notin_(active_sub_user_ids),
+                )
+            )
+        )
+        stale_certs = result.scalars().all()
+
+        for cert in stale_certs:
+            cert.is_active = False
+            deactivated += 1
+
+        await db.commit()
+
+    logger.info("deactivate_expired_certificates_done", deactivated=deactivated)
+    return deactivated

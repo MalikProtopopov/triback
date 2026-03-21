@@ -110,6 +110,9 @@ class PaymentWebhookService:
 
         await self.db.commit()
 
+        if payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
+            await self._trigger_certificate_generation(payment.user_id, now.year)
+
         from app.models.users import User
 
         email_result = await self.db.execute(
@@ -212,6 +215,22 @@ class PaymentWebhookService:
     # Moneta-specific handlers
     # ------------------------------------------------------------------
 
+    async def _trigger_certificate_generation(self, user_id: Any, year: int) -> None:
+        """Dispatch certificate generation if the user is an active doctor."""
+        dp_result = await self.db.execute(
+            select(DoctorProfile).where(DoctorProfile.user_id == user_id)
+        )
+        dp = dp_result.scalar_one_or_none()
+        if dp and dp.status == DoctorStatus.ACTIVE:
+            from app.tasks.certificate_tasks import generate_member_certificate_task
+
+            await generate_member_certificate_task.kiq(str(dp.id), year)
+            logger.info(
+                "certificate_generation_triggered",
+                doctor_profile_id=str(dp.id),
+                year=year,
+            )
+
     async def handle_moneta_payment_succeeded(self, payment: Payment) -> None:
         """Process a successful Moneta payment — same business logic as YooKassa."""
         if payment.status == PaymentStatus.SUCCEEDED:
@@ -227,6 +246,9 @@ class PaymentWebhookService:
             await self._confirm_event_registration(payment)
 
         await self.db.commit()
+
+        if payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
+            await self._trigger_certificate_generation(payment.user_id, now.year)
 
         from app.models.users import User
 

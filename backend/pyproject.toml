@@ -31,6 +31,7 @@ email-validator = "^2.3.0"
 python-multipart = "^0.0.22"
 python-dateutil = "^2.9.0.post0"
 reportlab = "^4.4.10"
+qrcode = {version = "^8.0", extras = ["pil"]}
 gunicorn = "^25.1.0"
 slowapi = "^0.1.9"
 jinja2 = "^3.1.6"

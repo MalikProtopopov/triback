@@ -9,6 +9,7 @@ _redis_url = str(settings.REDIS_URL)
 result_backend = RedisAsyncResultBackend(_redis_url)
 broker = ListQueueBroker(url=_redis_url).with_result_backend(result_backend)
 
+import app.tasks.certificate_tasks  # noqa: E402, F401
 import app.tasks.email_tasks  # noqa: E402, F401
 import app.tasks.profile_tasks  # noqa: E402, F401
 import app.tasks.scheduler  # noqa: E402, F401

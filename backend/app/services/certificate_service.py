@@ -1,20 +1,24 @@
-"""Certificate service — list, download (presigned URL), generate PDF stub."""
+"""Certificate service — list, download, generate PDF with QR, stamp, signature."""
 
 from __future__ import annotations
 
 import io
-import uuid
 from datetime import UTC, datetime
 from uuid import UUID
 
+import qrcode
 import structlog
+from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings as app_settings
 from app.core.enums import DoctorStatus, SubscriptionStatus
 from app.core.exceptions import ForbiddenError, NotFoundError
+from app.models.certificate_settings import CertificateSettings
 from app.models.certificates import Certificate
 from app.models.events import Event
 from app.models.profiles import DoctorProfile
@@ -29,7 +33,7 @@ class CertificateService:
         self.db = db
 
     async def _has_active_subscription(self, user_id: str) -> bool:
-        from sqlalchemy import func, or_
+        from sqlalchemy import or_
 
         result = await self.db.execute(
             select(Subscription.id).where(
@@ -81,6 +85,8 @@ class CertificateService:
             for evt in ev_q.scalars().all():
                 event_map[evt.id] = evt
 
+        qr_base = app_settings.CERTIFICATE_QR_BASE_URL or app_settings.FRONTEND_URL
+
         items: list[dict] = []
         for cert in certs:
             event_nested = None
@@ -89,7 +95,8 @@ class CertificateService:
                 if evt:
                     event_nested = {"id": str(evt.id), "title": evt.title}
 
-            download_url = await file_service.get_presigned_url(cert.file_url, ttl=600)
+            download_url = await file_service.get_presigned_url(cert.file_url, ttl=3600)
+            verify_url = f"{qr_base.rstrip('/')}/certificates/verify/{cert.certificate_number}"
 
             items.append({
                 "id": str(cert.id),
@@ -100,26 +107,68 @@ class CertificateService:
                 "is_active": cert.is_active,
                 "generated_at": cert.generated_at.isoformat(),
                 "download_url": download_url,
+                "verify_url": verify_url,
             })
 
         return items
 
     async def download_certificate(self, user_id: str, cert_id: UUID) -> str:
-        """Return presigned URL for a specific certificate. Verify ownership."""
         await self._get_active_profile(user_id)
 
         cert = await self.db.get(Certificate, cert_id)
-        if not cert or str(cert.user_id) != user_id or not cert.is_active:
+        if not cert or str(cert.user_id) != user_id:
             raise NotFoundError("Certificate not found")
+        if not cert.is_active:
+            raise ForbiddenError("Certificate is no longer active")
 
         return await file_service.get_presigned_url(cert.file_url, ttl=600)
+
+    # ------------------------------------------------------------------
+    # Generation
+    # ------------------------------------------------------------------
+
+    async def _get_cert_settings(self) -> CertificateSettings:
+        result = await self.db.execute(
+            select(CertificateSettings).where(CertificateSettings.id == 1)
+        )
+        settings = result.scalar_one_or_none()
+        if not settings:
+            settings = CertificateSettings(id=1)
+            self.db.add(settings)
+            await self.db.commit()
+            await self.db.refresh(settings)
+        return settings
+
+    async def _next_certificate_number(self, prefix: str, year: int) -> str:
+        result = await self.db.execute(
+            select(func.count()).select_from(Certificate).where(
+                Certificate.certificate_type == "member",
+                Certificate.year == year,
+            )
+        )
+        count = result.scalar() or 0
+        seq = count + 1
+        return f"{prefix}-{year}-{seq:06d}"
+
+    async def _download_s3_bytes(self, s3_key: str | None) -> bytes | None:
+        if not s3_key:
+            return None
+        try:
+            session = file_service._get_s3_session()
+            async with session.client(**file_service._s3_client_kwargs()) as s3:
+                resp = await s3.get_object(
+                    Bucket=file_service.settings.S3_BUCKET, Key=s3_key
+                )
+                return await resp["Body"].read()
+        except Exception:
+            logger.warning("s3_asset_download_failed", s3_key=s3_key)
+            return None
 
     async def generate_membership_certificate(
         self,
         doctor_profile_id: UUID,
         year: int | None = None,
     ) -> Certificate:
-        """Generate a stub PDF membership certificate, upload to S3, create DB record."""
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.id == doctor_profile_id)
         )
@@ -127,16 +176,60 @@ class CertificateService:
         if not profile:
             raise NotFoundError("Doctor profile not found")
 
+        cert_settings = await self._get_cert_settings()
         cert_year = year or datetime.now(UTC).year
-        cert_number = f"MBR-{cert_year}-{uuid.uuid4().hex[:8].upper()}"
 
-        pdf_bytes = _generate_stub_pdf(
-            f"{profile.last_name} {profile.first_name}",
-            cert_number,
-            cert_year,
+        full_name = " ".join(
+            filter(None, [profile.last_name, profile.first_name, profile.middle_name])
         )
 
-        s3_key = f"certificates/{doctor_profile_id}/{uuid.uuid4()}.pdf"
+        existing_result = await self.db.execute(
+            select(Certificate).where(
+                Certificate.doctor_profile_id == doctor_profile_id,
+                Certificate.certificate_type == "member",
+                Certificate.year == cert_year,
+            )
+        )
+        existing_cert = existing_result.scalar_one_or_none()
+
+        if existing_cert:
+            cert_number = existing_cert.certificate_number
+        else:
+            cert_number = await self._next_certificate_number(
+                cert_settings.certificate_number_prefix, cert_year
+            )
+
+        logo_bytes = await self._download_s3_bytes(cert_settings.logo_s3_key)
+        stamp_bytes = await self._download_s3_bytes(cert_settings.stamp_s3_key)
+        signature_bytes = await self._download_s3_bytes(cert_settings.signature_s3_key)
+        background_bytes = await self._download_s3_bytes(cert_settings.background_s3_key)
+
+        body_text = (cert_settings.certificate_member_text or "").format(
+            full_name=full_name, year=cert_year
+        )
+        validity_text = (cert_settings.validity_text_template or "").format(
+            year=cert_year
+        )
+
+        qr_base = app_settings.CERTIFICATE_QR_BASE_URL or app_settings.FRONTEND_URL
+        qr_url = f"{qr_base.rstrip('/')}/certificates/verify/{cert_number}"
+
+        pdf_bytes = _generate_member_pdf(
+            full_name=full_name,
+            cert_number=cert_number,
+            year=cert_year,
+            body_text=body_text,
+            validity_text=validity_text,
+            president_name=cert_settings.president_full_name or "",
+            president_title=cert_settings.president_title or "",
+            qr_url=qr_url,
+            logo_bytes=logo_bytes,
+            stamp_bytes=stamp_bytes,
+            signature_bytes=signature_bytes,
+            background_bytes=background_bytes,
+        )
+
+        s3_key = f"certificates/{doctor_profile_id}/{cert_number}.pdf"
         session = file_service._get_s3_session()
         async with session.client(**file_service._s3_client_kwargs()) as s3:
             await s3.put_object(
@@ -145,6 +238,20 @@ class CertificateService:
                 Body=pdf_bytes,
                 ContentType="application/pdf",
             )
+
+        if existing_cert:
+            if existing_cert.file_url != s3_key:
+                try:
+                    await file_service.delete_file(existing_cert.file_url)
+                except Exception:
+                    pass
+            existing_cert.file_url = s3_key
+            existing_cert.is_active = True
+            existing_cert.generated_at = datetime.now(UTC)  # type: ignore[assignment]
+            await self.db.commit()
+            await self.db.refresh(existing_cert)
+            logger.info("certificate_regenerated", cert_id=str(existing_cert.id), number=cert_number)
+            return existing_cert
 
         cert = Certificate(
             user_id=profile.user_id,
@@ -157,13 +264,17 @@ class CertificateService:
         )
         self.db.add(cert)
         await self.db.commit()
+        await self.db.refresh(cert)
 
         logger.info("certificate_generated", cert_id=str(cert.id), number=cert_number)
         return cert
 
 
+# ======================================================================
+# PDF Generation
+# ======================================================================
+
 def _register_cyrillic_fonts() -> bool:
-    """Try to register DejaVuSans for Cyrillic text. Returns True if available."""
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
@@ -174,78 +285,238 @@ def _register_cyrillic_fonts() -> bool:
         "/usr/local/share/fonts/DejaVuSans.ttf",
     ]
     bold_paths = [p.replace("DejaVuSans.ttf", "DejaVuSans-Bold.ttf") for p in font_paths]
+    italic_paths = [p.replace("DejaVuSans.ttf", "DejaVuSans-Oblique.ttf") for p in font_paths]
 
     import os
 
+    registered = False
     for path in font_paths:
         if os.path.exists(path):
             pdfmetrics.registerFont(TTFont("DejaVuSans", path))
-            for bp in bold_paths:
-                if os.path.exists(bp):
-                    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bp))
-                    return True
-            return True
-    return False
+            registered = True
+            break
+
+    if registered:
+        for bp in bold_paths:
+            if os.path.exists(bp):
+                pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bp))
+                break
+        for ip in italic_paths:
+            if os.path.exists(ip):
+                pdfmetrics.registerFont(TTFont("DejaVuSans-Oblique", ip))
+                break
+
+    return registered
 
 
 _CYRILLIC_READY: bool | None = None
 
 
-def _ensure_fonts() -> tuple[str, str]:
-    """Return (regular_font, bold_font) names, registering Cyrillic if possible."""
+def _ensure_fonts() -> tuple[str, str, str]:
+    """Return (regular, bold, italic) font names."""
     global _CYRILLIC_READY  # noqa: PLW0603
     if _CYRILLIC_READY is None:
         _CYRILLIC_READY = _register_cyrillic_fonts()
     if _CYRILLIC_READY:
-        return ("DejaVuSans", "DejaVuSans-Bold")
-    return ("Helvetica", "Helvetica-Bold")
+        return ("DejaVuSans", "DejaVuSans-Bold", "DejaVuSans-Oblique")
+    return ("Helvetica", "Helvetica-Bold", "Helvetica-Oblique")
 
 
-def _generate_stub_pdf(full_name: str, cert_number: str, year: int) -> bytes:
-    """Generate a membership certificate PDF with Cyrillic support."""
-    regular, bold = _ensure_fonts()
+def _bytes_to_image_reader(data: bytes | None) -> ImageReader | None:
+    if not data:
+        return None
+    try:
+        return ImageReader(io.BytesIO(data))
+    except Exception:
+        return None
+
+
+def _generate_qr_image(url: str, box_size: int = 6) -> ImageReader:
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=box_size,
+        border=2,
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return ImageReader(buf)
+
+
+def _draw_border(c: canvas.Canvas, width: float, height: float) -> None:
+    """Draw a brown ornamental double border."""
+    brown = HexColor("#6B4226")
+    c.setStrokeColor(brown)
+
+    c.setLineWidth(3)
+    c.rect(25, 25, width - 50, height - 50)
+
+    c.setLineWidth(1.5)
+    c.rect(32, 32, width - 64, height - 64)
+
+    c.setLineWidth(0.5)
+    c.rect(37, 37, width - 74, height - 74)
+
+
+def _wrap_text(text: str, max_width: float, font_name: str, font_size: float) -> list[str]:
+    """Simple word-wrap for centered text."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    words = text.split()
+    lines: list[str] = []
+    current_line = ""
+
+    for word in words:
+        test = f"{current_line} {word}".strip()
+        if stringWidth(test, font_name, font_size) <= max_width:
+            current_line = test
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = word
+
+    if current_line:
+        lines.append(current_line)
+
+    return lines or [""]
+
+
+def _generate_member_pdf(
+    full_name: str,
+    cert_number: str,
+    year: int,
+    body_text: str,
+    validity_text: str,
+    president_name: str,
+    president_title: str,
+    qr_url: str,
+    logo_bytes: bytes | None = None,
+    stamp_bytes: bytes | None = None,
+    signature_bytes: bytes | None = None,
+    background_bytes: bytes | None = None,
+) -> bytes:
+    regular, bold, italic = _ensure_fonts()
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     width, height = A4
 
-    from reportlab.lib.colors import HexColor
+    _draw_border(c, width, height)
 
-    border_color = HexColor("#1a5276")
-    c.setStrokeColor(border_color)
-    c.setLineWidth(3)
-    c.rect(40, 40, width - 80, height - 80)
-    c.setLineWidth(1)
-    c.rect(50, 50, width - 100, height - 100)
+    # Background watermark
+    bg_img = _bytes_to_image_reader(background_bytes)
+    if bg_img:
+        c.saveState()
+        c.setFillAlpha(0.08)
+        bg_w, bg_h = 400, 250
+        c.drawImage(
+            bg_img,
+            (width - bg_w) / 2, (height - bg_h) / 2 - 30,
+            width=bg_w, height=bg_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+        c.restoreState()
 
-    c.setFont(bold, 28)
-    c.setFillColor(border_color)
-    c.drawCentredString(width / 2, height - 140, "СЕРТИФИКАТ")
+    y_cursor = height - 70
 
-    c.setFont(regular, 16)
-    c.setFillColor(HexColor("#2c3e50"))
-    c.drawCentredString(width / 2, height - 175, "ЧЛЕНА АССОЦИАЦИИ ТРИХОЛОГОВ")
+    # Logo
+    logo_img = _bytes_to_image_reader(logo_bytes)
+    if logo_img:
+        logo_w, logo_h = 90, 90
+        c.drawImage(
+            logo_img,
+            (width - logo_w) / 2, y_cursor - logo_h,
+            width=logo_w, height=logo_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+        y_cursor -= logo_h + 15
+    else:
+        y_cursor -= 20
 
-    c.setFont(regular, 12)
-    c.setFillColor(HexColor("#555555"))
-    c.drawCentredString(width / 2, height - 220, "Настоящим подтверждается, что")
+    # "СЕРТИФИКАТ" heading
+    dark_brown = HexColor("#5C3A1E")
+    c.setFont(italic, 32)
+    c.setFillColor(dark_brown)
+    c.drawCentredString(width / 2, y_cursor, "СЕРТИФИКАТ")
+    y_cursor -= 45
 
+    # Doctor full name
     c.setFont(bold, 22)
-    c.setFillColor(HexColor("#1a5276"))
-    c.drawCentredString(width / 2, height - 260, full_name)
+    c.setFillColor(HexColor("#1a1a1a"))
+    name_lines = _wrap_text(full_name, width - 120, bold, 22)
+    for line in name_lines:
+        c.drawCentredString(width / 2, y_cursor, line)
+        y_cursor -= 30
+    y_cursor -= 10
 
-    c.setFont(regular, 12)
-    c.setFillColor(HexColor("#555555"))
-    c.drawCentredString(width / 2, height - 300, "является действительным членом")
-    c.drawCentredString(width / 2, height - 320, "Ассоциации трихологов")
-
+    # Body text (multi-line, centered)
+    text_color = HexColor("#333333")
     c.setFont(regular, 11)
-    c.setFillColor(HexColor("#888888"))
-    c.drawCentredString(width / 2, height - 380, f"Номер сертификата: {cert_number}")
-    c.drawCentredString(width / 2, height - 400, f"Год: {year}")
+    c.setFillColor(text_color)
+    max_text_width = width - 120
+    body_lines = _wrap_text(body_text, max_text_width, regular, 11)
+    for line in body_lines:
+        c.drawCentredString(width / 2, y_cursor, line)
+        y_cursor -= 16
+    y_cursor -= 10
 
-    c.setFont(regular, 10)
-    c.setFillColor(HexColor("#aaaaaa"))
-    c.drawCentredString(width / 2, 80, "Ассоциация трихологов — trichology.ru")
+    # Validity text
+    if validity_text:
+        c.setFont(bold, 13)
+        c.setFillColor(dark_brown)
+        c.drawCentredString(width / 2, y_cursor, validity_text)
+        y_cursor -= 30
+
+    # Bottom section: QR left, stamp+signature right
+    bottom_y = 60
+    margin_x = 55
+
+    # QR code — bottom left
+    qr_img = _generate_qr_image(qr_url, box_size=5)
+    qr_size = 85
+    c.drawImage(qr_img, margin_x, bottom_y, width=qr_size, height=qr_size, mask="auto")
+    c.setFont(regular, 7)
+    c.setFillColor(HexColor("#888888"))
+    c.drawString(margin_x, bottom_y - 10, "проверить сертификат")
+
+    # Stamp + Signature — bottom right
+    right_block_x = width - margin_x - 180
+    stamp_img = _bytes_to_image_reader(stamp_bytes)
+    sig_img = _bytes_to_image_reader(signature_bytes)
+
+    if stamp_img:
+        stamp_size = 100
+        c.drawImage(
+            stamp_img,
+            right_block_x, bottom_y + 15,
+            width=stamp_size, height=stamp_size,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+
+    if sig_img:
+        sig_w, sig_h = 120, 40
+        c.drawImage(
+            sig_img,
+            right_block_x + 60, bottom_y + 55,
+            width=sig_w, height=sig_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+
+    # President info text — bottom right
+    c.setFont(regular, 9)
+    c.setFillColor(HexColor("#333333"))
+    pres_x = right_block_x + 10
+    if president_title:
+        c.drawString(pres_x, bottom_y + 5, president_title)
+    if president_name:
+        c.drawString(pres_x, bottom_y - 8, president_name)
 
     c.save()
     return buf.getvalue()
@@ -254,23 +525,15 @@ def _generate_stub_pdf(full_name: str, cert_number: str, year: int) -> bytes:
 def generate_event_certificate_pdf(
     full_name: str, event_title: str, event_date: str, cert_number: str
 ) -> bytes:
-    """Generate an event participation certificate PDF."""
-    regular, bold = _ensure_fonts()
+    regular, bold, italic = _ensure_fonts()
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     width, height = A4
 
-    from reportlab.lib.colors import HexColor
+    _draw_border(c, width, height)
 
-    border_color = HexColor("#1a5276")
-    c.setStrokeColor(border_color)
-    c.setLineWidth(3)
-    c.rect(40, 40, width - 80, height - 80)
-    c.setLineWidth(1)
-    c.rect(50, 50, width - 100, height - 100)
-
-    c.setFont(bold, 28)
-    c.setFillColor(border_color)
+    c.setFont(italic, 28)
+    c.setFillColor(HexColor("#5C3A1E"))
     c.drawCentredString(width / 2, height - 140, "СЕРТИФИКАТ УЧАСТНИКА")
 
     c.setFont(regular, 12)
@@ -278,7 +541,7 @@ def generate_event_certificate_pdf(
     c.drawCentredString(width / 2, height - 190, "Настоящим подтверждается, что")
 
     c.setFont(bold, 22)
-    c.setFillColor(HexColor("#1a5276"))
+    c.setFillColor(HexColor("#1a1a1a"))
     c.drawCentredString(width / 2, height - 230, full_name)
 
     c.setFont(regular, 12)
@@ -299,7 +562,7 @@ def generate_event_certificate_pdf(
 
     c.setFont(regular, 10)
     c.setFillColor(HexColor("#aaaaaa"))
-    c.drawCentredString(width / 2, 80, "Ассоциация трихологов — trichology.ru")
+    c.drawCentredString(width / 2, 80, "Профессиональное общество трихологов")
 
     c.save()
     return buf.getvalue()

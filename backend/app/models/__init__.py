@@ -1,6 +1,7 @@
 """Models package — imports all model modules so Alembic can discover them."""
 
 from app.models.base import Base  # noqa: F401
+from app.models.certificate_settings import CertificateSettings  # noqa: F401
 from app.models.certificates import Certificate  # noqa: F401
 from app.models.cities import City  # noqa: F401
 from app.models.content import (  # noqa: F401

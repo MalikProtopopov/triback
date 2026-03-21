@@ -6,6 +6,7 @@ Assembles sub-routers from domain-specific modules.
 from fastapi import APIRouter
 
 from app.api.v1.public.articles import router as articles_router
+from app.api.v1.public.certificates import router as certificates_router
 from app.api.v1.public.cities import router as cities_router
 from app.api.v1.public.doctors import router as doctors_router
 from app.api.v1.public.events import router as events_router
@@ -22,3 +23,4 @@ router.include_router(events_router)
 router.include_router(articles_router)
 router.include_router(org_docs_router)
 router.include_router(seo_router)
+router.include_router(certificates_router)
