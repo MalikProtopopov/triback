@@ -192,3 +192,39 @@ async def test_telegram_webhook_rejects_bad_secret(
         headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
     )
     assert resp.status_code == 403
+
+
+# ── User role binding tests ───────────────────────────────────────
+
+async def test_user_role_can_get_binding_status(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """Role 'user' should now be allowed to check binding status."""
+    from uuid import uuid4
+    from tests.conftest import _create_user_with_role
+
+    plain_user = await _create_user_with_role(
+        db_session, f"user_{uuid4().hex[:8]}@test.com", "user"
+    )
+    headers = _make_auth_headers(plain_user.id, "user")
+    resp = await client.get("/api/v1/telegram/binding", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["is_linked"] is False
+
+
+async def test_user_role_can_generate_code(
+    client: AsyncClient, db_session: AsyncSession, redis_mock
+):
+    """Role 'user' should be allowed to generate a Telegram auth code."""
+    from uuid import uuid4
+    from tests.conftest import _create_user_with_role
+
+    plain_user = await _create_user_with_role(
+        db_session, f"user_{uuid4().hex[:8]}@test.com", "user"
+    )
+    headers = _make_auth_headers(plain_user.id, "user")
+    resp = await client.post("/api/v1/telegram/generate-code", headers=headers)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "auth_code" in data
+    assert "bot_link" in data

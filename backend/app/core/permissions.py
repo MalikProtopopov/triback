@@ -57,6 +57,7 @@ _CLIENT_SIDEBAR = {
     "user": [
         "cabinet",
         "events",
+        "telegram",
         "settings",
     ],
 }

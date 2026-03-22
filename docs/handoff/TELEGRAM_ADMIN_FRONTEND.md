@@ -127,3 +127,55 @@
 | `ENCRYPTION_KEY` | Base64 Fernet-ключ. Генерация: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `PUBLIC_API_URL` | Нужен для webhook URL |
 | `TELEGRAM_*` | Fallback при отсутствии записи в БД |
+
+---
+
+## 3. Уведомления пользователей через Telegram
+
+После привязки Telegram-аккаунта пользователь получает дублирующие уведомления в боте:
+
+| Триггер | Задача |
+|---------|--------|
+| Результат модерации онбординга | `notify_user_moderation_result` |
+| Результат модерации черновика профиля | `notify_user_draft_result` |
+| Успешная оплата | `notify_user_payment_succeeded` |
+| Ошибка оплаты | `notify_user_payment_failed` |
+| Билет на мероприятие | `notify_user_event_ticket` |
+| Чек готов | `notify_user_receipt_available` |
+| Напоминание о подписке | `notify_user_subscription_expiring` |
+
+---
+
+## 4. Уведомления администратора
+
+Отправляются в `owner_chat_id` (настройка интеграции или `TELEGRAM_CHANNEL_ID`):
+
+| Триггер | Задача |
+|---------|--------|
+| Новая заявка на модерацию (онбординг) | `notify_admin_new_registration` |
+| Новый черновик профиля / фото на модерацию | `notify_admin_new_draft` |
+| Успешная оплата | `notify_admin_payment_received` |
+| Подписки истекают в ближайшие 7 дней (ежедневно) | `send_admin_expiring_subscriptions_report` |
+| Ошибка генерации сертификата | встроено в `certificate_tasks` |
+
+---
+
+## 5. Привязка Telegram для роли `user`
+
+Роль `user` теперь имеет доступ к эндпоинтам:
+
+- `GET /api/v1/telegram/binding` — статус привязки
+- `POST /api/v1/telegram/generate-code` — генерация кода для привязки
+
+Раздел `"telegram"` добавлен в sidebar клиента для роли `user`.
+
+---
+
+## 6. Telegram-статус в Admin API
+
+Поля `telegram_linked: bool` и `tg_username: string | null` добавлены в ответы:
+
+- `GET /api/v1/admin/doctors` — список врачей (`DoctorListItemResponse`)
+- `GET /api/v1/admin/doctors/{id}` — детальная карточка врача (`DoctorDetailResponse`)
+- `GET /api/v1/admin/portal-users` — список пользователей (`PortalUserListItem`)
+- `GET /api/v1/admin/portal-users/{id}` — детальная карточка пользователя (`PortalUserDetailResponse`)

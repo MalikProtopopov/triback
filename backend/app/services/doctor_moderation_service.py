@@ -82,6 +82,9 @@ class DoctorModerationService:
                 user.email, new_status, comment,
                 has_active_subscription=has_active_subscription if new_status == DoctorStatus.APPROVED else None,
             )
+            from app.tasks.telegram_tasks import notify_user_moderation_result
+
+            await notify_user_moderation_result.kiq(str(dp.user_id), new_status, comment)
 
         await self.db.commit()
         return new_status
@@ -141,6 +144,9 @@ class DoctorModerationService:
             await send_draft_result_notification.kiq(
                 user.email, email_status, rejection_reason
             )
+            from app.tasks.telegram_tasks import notify_user_draft_result
+
+            await notify_user_draft_result.kiq(str(dp.user_id), action, rejection_reason)
 
         await self.db.commit()
         return msg

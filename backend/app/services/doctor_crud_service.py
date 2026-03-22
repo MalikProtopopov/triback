@@ -23,7 +23,7 @@ from app.models.profiles import (
     ModerationHistory,
 )
 from app.models.subscriptions import Payment, Subscription
-from app.models.users import Role, User, UserRoleAssignment
+from app.models.users import Role, TelegramBinding, User, UserRoleAssignment
 from app.schemas.doctor_admin import (
     AdminCreateDoctorResponse,
     DoctorDetailResponse,
@@ -274,6 +274,16 @@ class DoctorCrudService:
                     if nested:
                         sub_map[s.user_id] = nested
 
+        tg_map: dict[UUID, TelegramBinding] = {}
+        if user_ids:
+            tg_rows = (
+                await self.db.execute(
+                    select(TelegramBinding).where(TelegramBinding.user_id.in_(user_ids))
+                )
+            ).scalars().all()
+            for tb in tg_rows:
+                tg_map[tb.user_id] = tb
+
         pending_set: set[UUID] = set()
         photo_draft_set: set[UUID] = set()
         if profile_ids:
@@ -313,6 +323,8 @@ class DoctorCrudService:
                     subscription=sub_map.get(dp.user_id),
                     has_pending_changes=dp.id in pending_set,
                     has_photo_in_draft=dp.id in photo_draft_set,
+                    telegram_linked=dp.user_id in tg_map,
+                    tg_username=tg_map[dp.user_id].tg_username if dp.user_id in tg_map else None,
                     created_at=dp.created_at,
                 )
             )
@@ -416,6 +428,12 @@ class DoctorCrudService:
 
         blocks = await list_blocks_for_entity(self.db, "doctor_profile", profile_id)
 
+        tg_binding = (
+            await self.db.execute(
+                select(TelegramBinding).where(TelegramBinding.user_id == dp.user_id)
+            )
+        ).scalar_one_or_none()
+
         return DoctorDetailResponse(
             id=dp.id,
             user_id=dp.user_id,
@@ -470,5 +488,7 @@ class DoctorCrudService:
                 )
                 for b in blocks
             ],
+            telegram_linked=tg_binding is not None,
+            tg_username=tg_binding.tg_username if tg_binding else None,
             created_at=dp.created_at,
         )

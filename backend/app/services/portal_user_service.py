@@ -12,7 +12,7 @@ from sqlalchemy.orm import joinedload
 from app.core.exceptions import NotFoundError
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment, Subscription
-from app.models.users import Role, User, UserRoleAssignment
+from app.models.users import Role, TelegramBinding, User, UserRoleAssignment
 from app.schemas.doctor_admin import (
     PortalUserDetailResponse,
     PortalUserListItem,
@@ -108,6 +108,16 @@ class PortalUserService:
                     if nested:
                         sub_map[s.user_id] = nested
 
+        tg_map: dict[UUID, TelegramBinding] = {}
+        if u_ids:
+            tg_rows = (
+                await self.db.execute(
+                    select(TelegramBinding).where(TelegramBinding.user_id.in_(u_ids))
+                )
+            ).scalars().all()
+            for tb in tg_rows:
+                tg_map[tb.user_id] = tb
+
         role_display_map = {"doctor": "Врач", "user": "Пользователь"}
         items: list[PortalUserListItem] = []
         for u in users:
@@ -118,6 +128,7 @@ class PortalUserService:
             dp_id = dp.id if dp else None
             full_name = f"{dp.last_name} {dp.first_name}" if dp else None
 
+            tg = tg_map.get(u.id)
             items.append(
                 PortalUserListItem(
                     id=u.id,
@@ -127,6 +138,8 @@ class PortalUserService:
                     role_display=role_display_map.get(display_role, "Без роли") if display_role else "Без роли",
                     doctor_profile_id=dp_id,
                     subscription=sub_map.get(u.id) if display_role == "doctor" else None,
+                    telegram_linked=tg is not None,
+                    tg_username=tg.tg_username if tg else None,
                     created_at=u.created_at,
                 )
             )
@@ -173,6 +186,12 @@ class PortalUserService:
         for p in pay_result.scalars().all():
             payments_list.append(payment_to_nested(p))
 
+        tg_binding = (
+            await self.db.execute(
+                select(TelegramBinding).where(TelegramBinding.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+
         return PortalUserDetailResponse(
             id=user.id,
             email=user.email,
@@ -185,5 +204,7 @@ class PortalUserService:
             doctor_profile_status=dp_status,
             subscription=sub_info,
             payments=payments_list,
+            telegram_linked=tg_binding is not None,
+            tg_username=tg_binding.tg_username if tg_binding else None,
             created_at=user.created_at,
         )

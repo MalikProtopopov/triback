@@ -112,6 +112,8 @@ class DoctorListItemResponse(BaseModel):
     subscription: SubscriptionNested | None = None
     has_pending_changes: bool = False
     has_photo_in_draft: bool = False
+    telegram_linked: bool = False
+    tg_username: str | None = None
     created_at: datetime
 
 
@@ -145,6 +147,8 @@ class DoctorDetailResponse(BaseModel):
     pending_draft: PendingDraftNested | None = None
     moderation_history: list[ModerationHistoryNested] = []
     content_blocks: list[ContentBlockNested] = []
+    telegram_linked: bool = False
+    tg_username: str | None = None
     created_at: datetime
 
 
@@ -230,6 +234,8 @@ class PortalUserListItem(BaseModel):
     doctor_profile_id: UUID | None = None
     subscription: SubscriptionNested | None = None
     last_payment: PaymentNested | None = None
+    telegram_linked: bool = False
+    tg_username: str | None = None
     created_at: datetime
 
 
@@ -245,4 +251,6 @@ class PortalUserDetailResponse(BaseModel):
     doctor_profile_status: str | None = None
     subscription: SubscriptionNested | None = None
     payments: list[PaymentNested] = []
+    telegram_linked: bool = False
+    tg_username: str | None = None
     created_at: datetime

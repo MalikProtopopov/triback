@@ -293,6 +293,10 @@ class OnboardingService:
         profile.onboarding_submitted_at = datetime.now(tz=UTC)
         await self.db.commit()
 
+        from app.tasks.telegram_tasks import notify_admin_new_registration
+
+        await notify_admin_new_registration.kiq(str(profile.user_id))
+
         return {
             "message": "Заявка отправлена на модерацию. Мы уведомим вас о результате",
             "next_step": "await_moderation",

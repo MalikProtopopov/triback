@@ -26,13 +26,13 @@ router = APIRouter(prefix="/telegram")
     responses=error_responses(401, 403),
 )
 async def get_binding_status(
-    payload: dict[str, Any] = require_role("doctor"),
+    payload: dict[str, Any] = require_role("doctor", "user"),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Показывает, привязан ли Telegram-аккаунт к профилю.
 
     - **401** — не авторизован
-    - **403** — роль не doctor
+    - **403** — роль не doctor/user
     """
     svc = TelegramService()
     return await svc.get_binding_status(db, payload["sub"])
@@ -46,14 +46,14 @@ async def get_binding_status(
     responses=error_responses(401, 403, 409),
 )
 async def generate_code(
-    payload: dict[str, Any] = require_role("doctor"),
+    payload: dict[str, Any] = require_role("doctor", "user"),
     db: AsyncSession = Depends(get_db_session),
     redis=Depends(get_redis),
 ) -> dict:
     """Генерирует одноразовый код для привязки Telegram через бота.
 
     - **401** — не авторизован
-    - **403** — роль не doctor
+    - **403** — роль не doctor/user
     - **409** — Telegram уже привязан
     """
     svc = TelegramService()

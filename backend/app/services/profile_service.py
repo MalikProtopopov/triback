@@ -169,6 +169,11 @@ class ProfileService:
             await self.db.rollback()
             raise ConflictError("Изменения уже на модерации. Дождитесь решения") from None
 
+        full_name = f"{profile.first_name or ''} {profile.last_name or ''}".strip() or str(user_id)
+        from app.tasks.telegram_tasks import notify_admin_new_draft
+
+        await notify_admin_new_draft.kiq(str(user_id), full_name)
+
     # ------------------------------------------------------------------
     # Photo upload with resize
     # ------------------------------------------------------------------
@@ -216,6 +221,12 @@ class ProfileService:
             self.db.add(draft)
 
         await self.db.commit()
+
+        if not existing_draft:
+            full_name = f"{profile.first_name or ''} {profile.last_name or ''}".strip() or str(user_id)
+            from app.tasks.telegram_tasks import notify_admin_new_draft
+
+            await notify_admin_new_draft.kiq(str(user_id), full_name)
 
         return {
             "photo_url": file_service.build_media_url(main_key),

@@ -65,6 +65,14 @@ async def start_scheduler() -> None:
             name="sched_deactivate_certs",
         )
     )
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic(
+                "expiring_report", send_admin_expiring_subscriptions_report, 86400
+            ),
+            name="sched_expiring_report",
+        )
+    )
     logger.info("scheduler_started", tasks=len(_scheduler_tasks))
 
 
@@ -298,6 +306,76 @@ async def expire_stale_pending_payments() -> int:
 
     logger.info("expire_stale_payments_done", expired=expired_count)
     return expired_count
+
+
+@broker.task  # type: ignore[misc]
+async def send_admin_expiring_subscriptions_report() -> int:
+    """Daily: send admin a Telegram report of subscriptions expiring in the next 7 days.
+
+    Each line: ФИО | email | дата окончания.
+    """
+    from app.core.database import AsyncSessionLocal
+    from app.models.subscriptions import Subscription
+    from app.models.users import User
+    from app.tasks.telegram_tasks import _get_svc_async
+
+    now = datetime.now(UTC)
+    cutoff = now + timedelta(days=7)
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Subscription, User).join(User, User.id == Subscription.user_id).where(
+                and_(
+                    Subscription.status == "active",
+                    Subscription.ends_at.isnot(None),
+                    Subscription.ends_at >= now,
+                    Subscription.ends_at <= cutoff,
+                )
+            )
+        )
+        rows = result.all()
+
+    if not rows:
+        logger.info("admin_expiring_report_empty")
+        return 0
+
+    lines = ["Подписки истекают в ближайшие 7 дней:\n"]
+    for sub, user in rows:
+        dp_result = None
+        full_name = user.email
+        # Try to get full name from doctor profile
+        try:
+            from app.core.database import AsyncSessionLocal as _ASL
+            from app.models.profiles import DoctorProfile
+
+            async with _ASL() as db2:
+                dp = (
+                    await db2.execute(
+                        select(DoctorProfile).where(DoctorProfile.user_id == user.id)
+                    )
+                ).scalar_one_or_none()
+                if dp and (dp.first_name or dp.last_name):
+                    full_name = f"{dp.first_name or ''} {dp.last_name or ''}".strip()
+        except Exception:
+            pass
+        end_str = sub.ends_at.strftime("%d.%m.%Y") if sub.ends_at else "—"
+        lines.append(f"• {full_name} | {user.email} | {end_str}")
+
+    text = "\n".join(lines)
+
+    svc = await _get_svc_async()
+    if not svc._token or not svc._owner_chat_id:
+        logger.warning("telegram_not_configured_for_report")
+        return 0
+
+    try:
+        await svc.send_message(int(svc._owner_chat_id), text)
+    except Exception:
+        logger.exception("send_admin_expiring_report_failed")
+        return 0
+
+    logger.info("admin_expiring_report_sent", count=len(rows))
+    return len(rows)
 
 
 @broker.task  # type: ignore[misc]

@@ -127,10 +127,16 @@ class PaymentWebhookService:
                 await send_payment_succeeded_notification.kiq(
                     email, float(payment.amount), payment.product_type, receipt_url
                 )
-            from app.tasks.telegram_tasks import notify_admin_payment_received
+            from app.tasks.telegram_tasks import (
+                notify_admin_payment_received,
+                notify_user_payment_succeeded,
+            )
 
             await notify_admin_payment_received.kiq(
                 email, float(payment.amount), payment.product_type
+            )
+            await notify_user_payment_succeeded.kiq(
+                str(payment.user_id), float(payment.amount), payment.product_type
             )
 
     async def _activate_subscription(self, payment: Payment, now: datetime) -> None:
@@ -191,6 +197,9 @@ class PaymentWebhookService:
         email = email_result.scalar_one_or_none()
         if email:
             await send_payment_failed_notification.kiq(email)
+        from app.tasks.telegram_tasks import notify_user_payment_failed
+
+        await notify_user_payment_failed.kiq(str(payment.user_id))
 
     async def _cancel_event_registration(self, payment: Payment) -> None:
         from app.models.events import EventRegistration, EventTariff
@@ -251,6 +260,14 @@ class PaymentWebhookService:
             float(reg.applied_price),
             reg.is_member_price,
             receipt_url,
+        )
+        from app.tasks.telegram_tasks import notify_user_event_ticket
+
+        await notify_user_event_ticket.kiq(
+            str(payment.user_id),
+            event.title,
+            event.event_date.strftime("%d.%m.%Y %H:%M") if event.event_date else "",
+            float(reg.applied_price),
         )
 
     # ------------------------------------------------------------------

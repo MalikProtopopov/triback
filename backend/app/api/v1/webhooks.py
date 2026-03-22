@@ -304,9 +304,13 @@ async def moneta_receipt_webhook(
         user_email = email_result.scalar_one_or_none()
         if user_email:
             from app.tasks.email_tasks import send_receipt_available_notification
+            from app.tasks.telegram_tasks import notify_user_receipt_available
 
             await send_receipt_available_notification.kiq(
                 user_email, final_receipt_url, float(payment.amount)
+            )
+            await notify_user_receipt_available.kiq(
+                str(payment.user_id), float(payment.amount)
             )
 
     return JSONResponse(content={"status": "ok"})

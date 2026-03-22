@@ -182,6 +182,9 @@ class NotificationService:
                     title=f"Напоминание: подписка истекает через {days_left} дн.",
                     body=f"Ваша подписка истекает через {days_left} дней. Продлите членство.",
                 )
+                from app.tasks.telegram_tasks import notify_user_subscription_expiring
+
+                await notify_user_subscription_expiring.kiq(str(sub.user_id), days_left)
                 count += 1
 
         return count
