@@ -226,7 +226,7 @@ class TelegramIntegrationService:
         await _telegram_api(
             token,
             "setWebhook",
-            json_body={"url": url},
+            json_body={"url": url, "secret_token": row.webhook_secret},
         )
         row.is_webhook_active = True
         row.webhook_url = url
@@ -291,7 +291,11 @@ class TelegramIntegrationService:
         if not url:
             return
         try:
-            await _telegram_api(token, "setWebhook", json_body={"url": url})
+            await _telegram_api(
+                token,
+                "setWebhook",
+                json_body={"url": url, "secret_token": row.webhook_secret},
+            )
             row.is_webhook_active = True
         except Exception as e:
             logger.warning("set_webhook_failed", error=str(e))
