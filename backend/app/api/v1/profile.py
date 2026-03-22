@@ -207,11 +207,12 @@ async def list_my_events(
     """
     from sqlalchemy import func, select
 
-    from app.models.events import Event, EventRegistration
+    from app.models.events import Event, EventRegistration, EventTariff
 
     base = (
-        select(EventRegistration, Event)
+        select(EventRegistration, Event, EventTariff)
         .join(Event, EventRegistration.event_id == Event.id)
+        .outerjoin(EventTariff, EventRegistration.event_tariff_id == EventTariff.id)
         .where(
             EventRegistration.user_id == user_id,
             EventRegistration.status == "confirmed",
@@ -232,12 +233,14 @@ async def list_my_events(
         MyEventListItem(
             registration_id=reg.id,
             event_id=evt.id,
+            event_slug=evt.slug,
             title=evt.title,
             event_date=evt.event_date,
             status=reg.status,
             applied_price=float(reg.applied_price),
             is_member_price=reg.is_member_price,
+            tariff_name=tariff.name if tariff else None,
         )
-        for reg, evt in rows
+        for reg, evt, tariff in rows
     ]
     return {"data": items, "total": total, "limit": limit, "offset": offset}

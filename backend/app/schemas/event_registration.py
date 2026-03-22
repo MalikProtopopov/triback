@@ -98,11 +98,13 @@ class ConfirmGuestRegistrationRequest(BaseModel):
 class MyEventListItem(BaseModel):
     registration_id: UUID
     event_id: UUID
+    event_slug: str
     title: str
     event_date: datetime
     status: str
     applied_price: float
     is_member_price: bool
+    tariff_name: str | None = None
 
 
 class MyEventsPaginatedResponse(BaseModel):
