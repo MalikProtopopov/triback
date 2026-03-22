@@ -121,9 +121,12 @@ class PaymentWebhookService:
         email = email_result.scalar_one_or_none()
         if email:
             receipt_url = receipt_reg.get("receipt_url") if receipt_reg else None
-            await send_payment_succeeded_notification.kiq(
-                email, float(payment.amount), payment.product_type, receipt_url
-            )
+            if payment.product_type == ProductType.EVENT:
+                await self._send_event_email(payment, email, receipt_url)
+            else:
+                await send_payment_succeeded_notification.kiq(
+                    email, float(payment.amount), payment.product_type, receipt_url
+                )
             from app.tasks.telegram_tasks import notify_admin_payment_received
 
             await notify_admin_payment_received.kiq(
@@ -211,6 +214,45 @@ class PaymentWebhookService:
 
         await self.db.commit()
 
+    async def _send_event_email(
+        self, payment: Payment, email: str, receipt_url: str | None
+    ) -> None:
+        """Send a detailed event ticket email after successful payment."""
+        from app.models.events import Event, EventRegistration
+
+        if not payment.event_registration_id:
+            await send_payment_succeeded_notification.kiq(
+                email, float(payment.amount), payment.product_type, receipt_url
+            )
+            return
+
+        reg = await self.db.get(EventRegistration, payment.event_registration_id)
+        if not reg:
+            await send_payment_succeeded_notification.kiq(
+                email, float(payment.amount), payment.product_type, receipt_url
+            )
+            return
+
+        event = await self.db.get(Event, reg.event_id)
+        if not event:
+            await send_payment_succeeded_notification.kiq(
+                email, float(payment.amount), payment.product_type, receipt_url
+            )
+            return
+
+        from app.tasks.email_tasks import send_event_ticket_purchased
+
+        await send_event_ticket_purchased.kiq(
+            email,
+            event.title,
+            event.event_date.strftime("%d.%m.%Y %H:%M") if event.event_date else "",
+            event.event_end_date.strftime("%d.%m.%Y %H:%M") if event.event_end_date else None,
+            event.location,
+            float(reg.applied_price),
+            reg.is_member_price,
+            receipt_url,
+        )
+
     # ------------------------------------------------------------------
     # Moneta-specific handlers
     # ------------------------------------------------------------------
@@ -257,9 +299,12 @@ class PaymentWebhookService:
         )
         email = email_result.scalar_one_or_none()
         if email:
-            await send_payment_succeeded_notification.kiq(
-                email, float(payment.amount), payment.product_type, None
-            )
+            if payment.product_type == ProductType.EVENT:
+                await self._send_event_email(payment, email, None)
+            else:
+                await send_payment_succeeded_notification.kiq(
+                    email, float(payment.amount), payment.product_type, None
+                )
             from app.tasks.telegram_tasks import notify_admin_payment_received
 
             await notify_admin_payment_received.kiq(

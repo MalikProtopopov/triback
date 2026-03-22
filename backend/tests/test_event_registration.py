@@ -57,6 +57,7 @@ async def test_register_member_gets_discount(
     db_session: AsyncSession,
 ):
     from tests.factories import (
+        create_doctor_profile,
         create_event,
         create_event_tariff,
         create_plan,
@@ -68,6 +69,7 @@ async def test_register_member_gets_discount(
     event = await create_event(db_session, created_by=admin)
     tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
     plan = await create_plan(db_session)
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
     await create_subscription(db_session, user=doctor_user, plan=plan, status="active")
     await db_session.commit()
 

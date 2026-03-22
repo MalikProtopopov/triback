@@ -79,9 +79,8 @@ class EventRegistrationService:
         ).scalar_one_or_none()
 
         if existing:
-            return RegisterForEventResponse(
-                action="verify_existing",
-                masked_email=_mask_email(body.guest_email),
+            return await self._send_verification_code(
+                event, body, existing_user_id=existing.id,
             )
 
         return await self._send_verification_code(event, body)
@@ -133,20 +132,23 @@ class EventRegistrationService:
         if tariff.seats_limit is not None and tariff.seats_taken >= tariff.seats_limit:
             raise AppValidationError("No seats available for this tariff")
 
-        new_user_id = await self._create_guest_account(body.email, event.title)
+        existing_user_id_str = stored.get("existing_user_id")
+        if existing_user_id_str:
+            user_id = UUID(existing_user_id_str)
+        else:
+            user_id = await self._create_guest_account(body.email, event.title)
 
         await self.redis.delete(verify_key, attempts_key)
 
-        has_active_sub = await self._has_active_subscription(new_user_id)
-        applied_price = float(tariff.member_price if has_active_sub else tariff.price)
-        is_member_price = has_active_sub
+        is_member = await self._is_association_member(user_id)
+        applied_price = float(tariff.member_price if is_member else tariff.price)
 
         reg = EventRegistration(
-            user_id=new_user_id,
+            user_id=user_id,
             event_id=event_id,
             event_tariff_id=tariff.id,
             applied_price=applied_price,
-            is_member_price=is_member_price,
+            is_member_price=is_member,
             status=EventRegistrationStatus.PENDING,
             guest_full_name=body.guest_full_name,
             guest_email=body.email,
@@ -173,7 +175,7 @@ class EventRegistrationService:
         await self.db.flush()
 
         payment = Payment(
-            user_id=new_user_id,
+            user_id=user_id,
             amount=applied_price,
             product_type="event",
             payment_provider=settings.PAYMENT_PROVIDER,
@@ -189,13 +191,18 @@ class EventRegistrationService:
         payment_url = await self._process_payment(
             payment, event, tariff, reg, applied_price, body.email, body.fiscal_email
         )
+
+        access_token, refresh_token = await self._issue_tokens(user_id)
+
         await self.db.commit()
 
         return RegisterForEventResponse(
             registration_id=reg.id,
             payment_url=payment_url,
             applied_price=applied_price,
-            is_member_price=is_member_price,
+            is_member_price=is_member,
+            access_token=access_token,
+            refresh_token=refresh_token,
         )
 
     # -- private helpers -------------------------------------------------------
@@ -212,9 +219,9 @@ class EventRegistrationService:
         user = await self.db.get(User, user_id)
         user_email = user.email if user else None
 
-        has_active_sub = await self._has_active_subscription(user_id)
-        applied_price = float(tariff.member_price if has_active_sub else tariff.price)
-        is_member_price = has_active_sub
+        is_member = await self._is_association_member(user_id)
+        applied_price = float(tariff.member_price if is_member else tariff.price)
+        is_member_price = is_member
 
         reg = EventRegistration(
             user_id=user_id,
@@ -324,7 +331,10 @@ class EventRegistrationService:
         return payment.external_payment_url
 
     async def _send_verification_code(
-        self, event: Event, body: RegisterForEventRequest
+        self,
+        event: Event,
+        body: RegisterForEventRequest,
+        existing_user_id: UUID | None = None,
     ) -> RegisterForEventResponse:
         email = body.guest_email
         assert email is not None
@@ -343,6 +353,7 @@ class EventRegistrationService:
             "code": code,
             "event_id": str(event.id),
             "tariff_id": str(body.tariff_id),
+            "existing_user_id": str(existing_user_id) if existing_user_id else None,
         })
         await self.redis.set(verify_key, payload, ex=_VERIFY_TTL)
 
@@ -355,8 +366,9 @@ class EventRegistrationService:
 
         logger.info("verification_code_sent", email=email, event_id=str(event.id))
 
+        action = "verify_existing" if existing_user_id else "verify_new_email"
         return RegisterForEventResponse(
-            action="verify_new_email",
+            action=action,
             masked_email=_mask_email(email),
         )
 
@@ -394,10 +406,23 @@ class EventRegistrationService:
         logger.info("guest_account_created", email=email, user_id=str(user.id))
         return user.id
 
-    async def _has_active_subscription(self, user_id: UUID) -> bool:
+    async def _is_association_member(self, user_id: UUID) -> bool:
+        """True only if user is an ACTIVE doctor with an active subscription."""
         from sqlalchemy import func
 
-        result = await self.db.execute(
+        from app.core.enums import DoctorStatus
+        from app.models.profiles import DoctorProfile
+
+        dp = await self.db.execute(
+            select(DoctorProfile.id).where(
+                DoctorProfile.user_id == user_id,
+                DoctorProfile.status == DoctorStatus.ACTIVE,
+            ).limit(1)
+        )
+        if not dp.scalar_one_or_none():
+            return False
+
+        sub = await self.db.execute(
             select(Subscription.id).where(
                 Subscription.user_id == user_id,
                 Subscription.status == SubscriptionStatus.ACTIVE,
@@ -407,4 +432,27 @@ class EventRegistrationService:
                 ),
             ).limit(1)
         )
-        return result.scalar_one_or_none() is not None
+        return sub.scalar_one_or_none() is not None
+
+    async def _issue_tokens(self, user_id: UUID) -> tuple[str, str]:
+        """Generate JWT access + refresh tokens and store refresh in Redis."""
+        from app.core.security import create_access_token, create_refresh_token, generate_token
+        from app.models.users import Role, UserRoleAssignment
+
+        role_result = await self.db.execute(
+            select(Role)
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .where(UserRoleAssignment.user_id == user_id)
+        )
+        role_names = [r.name for r in role_result.scalars().all()]
+        priority = ("admin", "manager", "accountant", "doctor", "user")
+        role_name = next((r for r in priority if r in role_names), "user")
+
+        jti = generate_token(16)
+        access_token = create_access_token(user_id, role_name)
+        refresh_token = create_refresh_token(user_id, jti)
+
+        refresh_ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
+        await self.redis.set(f"refresh:{user_id}:{jti}", "1", ex=refresh_ttl)
+
+        return access_token, refresh_token

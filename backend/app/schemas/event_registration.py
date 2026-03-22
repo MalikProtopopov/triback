@@ -23,6 +23,8 @@ class RegisterForEventResponse(BaseModel):
     is_member_price: bool | None = None
     action: str | None = None
     masked_email: str | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
 
     model_config = ConfigDict(json_schema_extra={
         "examples": [
@@ -35,28 +37,47 @@ class RegisterForEventResponse(BaseModel):
                     "is_member_price": True,
                     "action": None,
                     "masked_email": None,
+                    "access_token": None,
+                    "refresh_token": None,
                 },
             },
             {
-                "summary": "Сценарий 2 — гость с существующим аккаунтом",
+                "summary": "Сценарий 2 — гость с существующим аккаунтом (OTP отправлен)",
                 "value": {
                     "registration_id": None,
                     "payment_url": None,
                     "applied_price": None,
                     "is_member_price": None,
-                    "action": "login_required",
+                    "action": "verify_existing",
                     "masked_email": "m***@mail.ru",
+                    "access_token": None,
+                    "refresh_token": None,
                 },
             },
             {
-                "summary": "Сценарий 3 — новый гость (верификация)",
+                "summary": "Сценарий 3 — новый гость (OTP отправлен)",
                 "value": {
                     "registration_id": None,
                     "payment_url": None,
                     "applied_price": None,
                     "is_member_price": None,
-                    "action": "verification_required",
+                    "action": "verify_new_email",
+                    "masked_email": "n***@example.com",
+                    "access_token": None,
+                    "refresh_token": None,
+                },
+            },
+            {
+                "summary": "Сценарий 4 — после подтверждения кода (confirm-guest-registration)",
+                "value": {
+                    "registration_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "payment_url": "https://payanyway.ru/assistant.htm?operationId=...",
+                    "applied_price": 7000.0,
+                    "is_member_price": False,
+                    "action": None,
                     "masked_email": None,
+                    "access_token": "eyJhbGciOiJSUzI1NiIs...",
+                    "refresh_token": "eyJhbGciOiJSUzI1NiIs...",
                 },
             },
         ]

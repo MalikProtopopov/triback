@@ -279,6 +279,7 @@ async def send_guest_account_created(
     email: str, temp_password: str, event_title: str, frontend_url: str
 ) -> None:
     login_url = frontend_url.rstrip("/") + "/auth/login"
+    events_url = frontend_url.rstrip("/") + "/my/events"
     html = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1f2937;'>Добро пожаловать!</h2>"
         f"<p style='color:#4b5563;line-height:1.6;'>Для участия в мероприятии "
@@ -287,7 +288,62 @@ async def send_guest_account_created(
         f"<tr><td style='color:#6b7280;'>Email:</td><td style='font-weight:bold;'>{_esc(email)}</td></tr>"
         f"<tr><td style='color:#6b7280;'>Пароль:</td><td style='font-weight:bold;'>{_esc(temp_password)}</td></tr>"
         f"</table>"
+        f"<p style='color:#4b5563;'>Информация о вашем мероприятии доступна в "
+        f"<a href='{events_url}' style='color:#2563eb;'>личном кабинете</a>.</p>"
         f"<p style='color:#4b5563;'>Рекомендуем сменить пароль после первого входа.</p>"
         f"{_button(login_url, 'Войти в аккаунт')}"
     )
     await send_smtp_email(email, f"Ваш аккаунт — {_BRAND}", html)
+
+
+@broker.task  # type: ignore[misc]
+async def send_event_ticket_purchased(
+    email: str,
+    event_title: str,
+    event_date: str,
+    event_end_date: str | None,
+    event_location: str | None,
+    applied_price: float,
+    is_member_price: bool,
+    receipt_url: str | None = None,
+) -> None:
+    dates = _esc(event_date)
+    if event_end_date:
+        dates += f" — {_esc(event_end_date)}"
+
+    location_row = ""
+    if event_location:
+        location_row = (
+            f"<tr><td style='color:#6b7280;padding:6px 8px;'>Место:</td>"
+            f"<td style='padding:6px 8px;'>{_esc(event_location)}</td></tr>"
+        )
+
+    price_label = "Цена для членов ассоциации" if is_member_price else "Стоимость билета"
+
+    receipt_block = ""
+    safe_receipt = _safe_url(receipt_url)
+    if safe_receipt:
+        receipt_block = (
+            f'<p style="margin-top:16px;">'
+            f'<a href="{safe_receipt}" style="color:#2563eb;">Скачать чек</a></p>'
+        )
+
+    events_url = _BASE_URL + "/my/events"
+    html_body = _wrap_html(
+        f"<h2 style='margin:0 0 16px;color:#1f2937;'>Билет на мероприятие</h2>"
+        f"<p style='color:#4b5563;line-height:1.6;'>Вы успешно приобрели билет:</p>"
+        f"<table style='margin:16px 0;width:100%;border-collapse:collapse;' cellpadding='0' cellspacing='0'>"
+        f"<tr><td style='color:#6b7280;padding:6px 8px;'>Мероприятие:</td>"
+        f"<td style='padding:6px 8px;font-weight:bold;'>{_esc(event_title)}</td></tr>"
+        f"<tr><td style='color:#6b7280;padding:6px 8px;'>Дата:</td>"
+        f"<td style='padding:6px 8px;'>{dates}</td></tr>"
+        f"{location_row}"
+        f"<tr><td style='color:#6b7280;padding:6px 8px;'>{price_label}:</td>"
+        f"<td style='padding:6px 8px;font-weight:bold;'>{applied_price:.2f} ₽</td></tr>"
+        f"</table>"
+        f"{receipt_block}"
+        f"<p style='color:#4b5563;line-height:1.6;'>Подробная информация доступна в "
+        f"<a href='{events_url}' style='color:#2563eb;'>личном кабинете</a>.</p>"
+        f"{_button(events_url, 'Мои мероприятия')}"
+    )
+    await send_smtp_email(email, f"Билет: {_esc(event_title)} — {_BRAND}", html_body)
