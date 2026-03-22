@@ -76,8 +76,10 @@ EventRegistration (id) ←── Payment (event_registration_id)
 
 ```
 GET /api/v1/subscriptions/payments/{payment_id}/receipt
-Authorization: Bearer <user_token>
+Authorization: Bearer <token>
 ```
+
+**Ограничение:** Endpoint доступен только владельцу платежа (роль `doctor`) — для платежей за подписку. В списке платежей админки (`GET /api/v1/admin/payments`) каждому платежу соответствует флаг `has_receipt`. Отдельного endpoint для скачивания чека администратором нет — чек приходит пользователю на email.
 
 ### Ответ
 
@@ -98,7 +100,7 @@ Authorization: Bearer <user_token>
 ### Как формируется чек
 
 1. При создании платежа — данные о товаре (название мероприятия + тариф) передаются в платёжную систему.
-2. Moneta формирует фискальный чек (54-ФЗ) и отправляет webhook на `/api/v1/webhooks/moneta/receipt`.
+2. Moneta формирует фискальный чек (54-ФЗ) и отправляет webhook на `POST /api/v1/webhooks/moneta/receipt`.
 3. Бэкенд сохраняет `Receipt` в БД и отправляет email пользователю со ссылкой на скачивание чека.
 
 ---
@@ -133,12 +135,17 @@ Authorization: Bearer <user_token>
 
 ## API эндпоинты для управления
 
+Базовый URL: `https://trihoback.mediann.dev` (или другой хост бэкенда).
+
 | Метод | Endpoint | Описание |
 |-------|----------|----------|
-| GET | `/admin/events/{id}/registrations` | Список регистраций |
-| GET | `/admin/events` | Список мероприятий |
-| POST | `/admin/events` | Создать мероприятие |
-| PUT | `/admin/events/{id}` | Обновить мероприятие |
-| POST | `/admin/events/{id}/tariffs` | Создать тариф |
-| PUT | `/admin/events/{id}/tariffs/{tid}` | Обновить тариф |
-| DELETE | `/admin/events/{id}/tariffs/{tid}` | Удалить тариф |
+| GET | `/api/v1/admin/events/{id}/registrations` | Список регистраций |
+| GET | `/api/v1/admin/events` | Список мероприятий |
+| GET | `/api/v1/admin/events/{id}` | Детали мероприятия |
+| POST | `/api/v1/admin/events` | Создать мероприятие (FormData: title, event_date, slug?, description?, location?, cover_image?) |
+| PATCH | `/api/v1/admin/events/{id}` | Обновить мероприятие (FormData) |
+| DELETE | `/api/v1/admin/events/{id}` | Удалить мероприятие |
+| POST | `/api/v1/admin/events/{id}/tariffs` | Создать тариф (JSON) |
+| PATCH | `/api/v1/admin/events/{id}/tariffs/{tid}` | Обновить тариф (JSON) |
+| DELETE | `/api/v1/admin/events/{id}/tariffs/{tid}` | Удалить тариф |
+| GET | `/api/v1/admin/payments` | Список всех платежей (фильтры: status, product_type, user_id, date_from, date_to) |

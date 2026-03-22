@@ -24,12 +24,14 @@ from sqlalchemy.orm import joinedload
 from app.core.config import settings
 from app.core.enums import PaymentStatus, ProductType, SubscriptionStatus
 from app.core.exceptions import AppValidationError, NotFoundError
+from app.models.events import Event, EventRegistration
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment, Plan, Subscription
 from app.schemas.payments import ManualPaymentRequest, ManualPaymentResponse, PaymentListResponse
 from app.schemas.subscriptions import (
     CurrentSubscriptionNested,
     PayResponse,
+    PaymentStatusResponse,
     PlanNested,
     SubscriptionStatusResponse,
 )
@@ -432,6 +434,43 @@ class SubscriptionService:
 
     async def cancel_payment(self, payment_id: UUID, reason: str) -> dict[str, Any]:
         return await self._admin.cancel_payment(payment_id, reason)
+
+    # ── GET /subscriptions/payments/{id}/status (public) ────────────
+
+    async def get_payment_status_public(self, payment_id: UUID) -> PaymentStatusResponse:
+        """Публичный статус платежа для страницы /payment/success.
+        Без авторизации. Возвращает status, product_type, event_id/event_title для event.
+        """
+        result = await self.db.execute(
+            select(Payment).where(Payment.id == payment_id)
+        )
+        payment = result.scalar_one_or_none()
+        if not payment:
+            raise NotFoundError("Payment not found")
+
+        event_id: UUID | None = None
+        event_title: str | None = None
+        if payment.product_type == ProductType.EVENT and payment.event_registration_id:
+            er_result = await self.db.execute(
+                select(EventRegistration)
+                .options(joinedload(EventRegistration.event))
+                .where(EventRegistration.id == payment.event_registration_id)
+            )
+            er = er_result.scalar_one_or_none()
+            if er and er.event:
+                event_id = er.event_id
+                event_title = er.event.title
+
+        return PaymentStatusResponse(
+            payment_id=payment.id,
+            status=payment.status,
+            product_type=payment.product_type,
+            amount=float(payment.amount),
+            created_at=payment.created_at,
+            paid_at=payment.paid_at,
+            event_id=event_id,
+            event_title=event_title,
+        )
 
     # ── POST /subscriptions/payments/{id}/check-status ─────────────
 

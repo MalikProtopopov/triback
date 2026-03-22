@@ -298,8 +298,8 @@ if (!has_subscription) {
 
 Двухшаговый флоу:
 
-1. `POST /events/{event_id}/register` с `guest_email` → ответ `action: "verify_new_email"` или `action: "verify_existing"`
-2. `POST /events/{event_id}/confirm-guest` с кодом подтверждения → ответ с `payment_url`
+1. `POST /api/v1/events/{event_id}/register` с `guest_email` → ответ `action: "verify_new_email"` или `action: "verify_existing"`
+2. `POST /api/v1/events/{event_id}/confirm-guest-registration` с кодом подтверждения → ответ с `payment_url`, `access_token`, `refresh_token`
 
 ---
 
@@ -368,10 +368,34 @@ Moneta выполняет фискализацию (54-ФЗ) через BPA PayA
 
 ### Фронт-страница `/payment/success`
 
-1. Показать "Оплата прошла успешно, подождите..."
-2. Polling `GET /subscriptions/status` каждые 2–3 секунды (макс 30 сек)
-3. Когда `has_subscription: true` + `status: "active"` → показать "Подписка активирована!"
-4. Если за 30 сек не обновился — "Платёж обрабатывается, статус обновится в течение нескольких минут"
+Moneta добавляет `?MNT_TRANSACTION_ID={payment_id}` к success/fail URL.
+
+**Универсальная страница (подписка + билет + взнос):**
+
+1. Извлечь `payment_id` из query (`MNT_TRANSACTION_ID`)
+2. Polling `GET /api/v1/subscriptions/payments/{payment_id}/status` каждые 2–3 сек (макс 30 сек)
+3. По `product_type` и `status` показать нужное сообщение:
+   - `product_type: "subscription" | "entry_fee"`, `status: "succeeded"` → «Подписка активирована!»
+   - `product_type: "event"`, `status: "succeeded"` → «Билет оплачен! Мероприятие: {event_title}»
+4. При `status: "pending"` — «Обработка платежа…»
+5. При `status: "failed"` / `"expired"` — «Оплата не прошла»
+
+**Ответ `GET /subscriptions/payments/{id}/status` (публичный, без auth):**
+
+```json
+{
+  "payment_id": "uuid",
+  "status": "pending" | "succeeded" | "failed" | "expired",
+  "product_type": "entry_fee" | "subscription" | "event",
+  "amount": 10000.00,
+  "created_at": "...",
+  "paid_at": null,
+  "event_id": "uuid",
+  "event_title": "Конференция 2026"
+}
+```
+
+`event_id`, `event_title` — только для `product_type === "event"`.
 
 ### Фронт-страница `/payment/fail`
 

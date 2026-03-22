@@ -10,6 +10,72 @@ from app.models.users import User
 from app.services.payment_providers.base import CreatePaymentResult
 
 
+async def test_get_payment_status_public_subscription(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    doctor_user: User,
+):
+    """GET /subscriptions/payments/{id}/status returns status without auth."""
+    from tests.factories import create_payment
+
+    payment = await create_payment(
+        db_session, user=doctor_user, product_type="subscription", status="succeeded"
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/subscriptions/payments/{payment.id}/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["payment_id"] == str(payment.id)
+    assert data["status"] == "succeeded"
+    assert data["product_type"] == "subscription"
+    assert data["amount"] == 5000.0
+    assert "created_at" in data
+    assert data["event_id"] is None
+    assert data["event_title"] is None
+
+
+async def test_get_payment_status_public_event(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    doctor_user: User,
+):
+    """GET /subscriptions/payments/{id}/status returns event_id/event_title for event."""
+    from app.models.subscriptions import Payment
+
+    from tests.factories import create_event, create_event_registration, create_event_tariff
+
+    event = await create_event(db_session, created_by=doctor_user, title="Конференция 2026")
+    tariff = await create_event_tariff(db_session, event=event)
+    reg = await create_event_registration(
+        db_session, user=doctor_user, event=event, tariff=tariff
+    )
+    payment = Payment(
+        user_id=doctor_user.id,
+        amount=5000.0,
+        product_type="event",
+        payment_provider="moneta",
+        status="succeeded",
+        event_registration_id=reg.id,
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/subscriptions/payments/{payment.id}/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["payment_id"] == str(payment.id)
+    assert data["product_type"] == "event"
+    assert data["event_id"] == str(event.id)
+    assert data["event_title"] == "Конференция 2026"
+
+
+async def test_get_payment_status_404(client: AsyncClient):
+    """GET /subscriptions/payments/{id}/status returns 404 for unknown payment."""
+    resp = await client.get(f"/api/v1/subscriptions/payments/{uuid4()}/status")
+    assert resp.status_code == 404
+
+
 async def test_pay_creates_payment(
     client: AsyncClient,
     auth_headers_doctor: dict[str, str],

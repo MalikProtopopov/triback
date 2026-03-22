@@ -14,6 +14,7 @@ from app.core.security import require_role
 from app.schemas.subscriptions import (
     PayRequest,
     PayResponse,
+    PaymentStatusResponse,
     ReceiptResponse,
     SubscriptionStatusResponse,
     UserPaymentPaginatedResponse,
@@ -98,6 +99,28 @@ async def list_my_payments(
     user_id = UUID(payload["sub"])
     svc = SubscriptionService(db, redis)
     return await svc.list_user_payments(user_id, limit=limit, offset=offset)
+
+
+@router.get(
+    "/payments/{payment_id}/status",
+    response_model=PaymentStatusResponse,
+    summary="Статус платежа (публичный)",
+    responses=error_responses(404),
+)
+async def get_payment_status(
+    payment_id: UUID,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+) -> PaymentStatusResponse:
+    """Возвращает статус платежа по ID. Публичный endpoint — без авторизации.
+
+    Используется страницей /payment/success для polling статуса после редиректа
+    с Moneta. MNT_TRANSACTION_ID в URL = payment_id.
+
+    - **404** — платёж не найден
+    """
+    svc = SubscriptionService(db, redis)
+    return await svc.get_payment_status_public(payment_id)
 
 
 @router.post(

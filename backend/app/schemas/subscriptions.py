@@ -90,6 +90,32 @@ class UserPaymentListItem(BaseModel):
     })
 
 
+class PaymentStatusResponse(BaseModel):
+    """Публичный статус платежа (для страницы /payment/success)."""
+
+    payment_id: UUID
+    status: str
+    product_type: str
+    amount: float
+    created_at: datetime
+    paid_at: datetime | None = None
+    event_id: UUID | None = None
+    event_title: str | None = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "payment_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "status": "succeeded",
+            "product_type": "event",
+            "amount": 5000.0,
+            "created_at": "2026-03-20T10:00:00Z",
+            "paid_at": "2026-03-20T10:05:00Z",
+            "event_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            "event_title": "Конференция 2026",
+        }
+    })
+
+
 class ReceiptResponse(BaseModel):
     id: UUID
     receipt_type: str

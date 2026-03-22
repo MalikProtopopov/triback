@@ -2,13 +2,17 @@
 
 Описание API для покупки билетов на мероприятия. Три сценария в зависимости от состояния авторизации.
 
+**Базовый URL:** `https://trihoback.mediann.dev` (или другой хост бэкенда).
+
+**Важно:** Все пути — `/api/v1/events/...` (без сегмента `public`).
+
 ---
 
 ## Общая схема
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    POST /public/events/{id}/register                    │
+│                    POST /api/v1/events/{id}/register                     │
 │                                                                         │
 │  JWT есть?                                                              │
 │  ├─ Да → Регистрация + Платёж → { payment_url }                       │
@@ -17,7 +21,7 @@
 │       └─ Новый email → OTP код на почту → action="verify_new_email"    │
 │                                                                         │
 │  После ввода кода:                                                     │
-│  POST /public/events/{id}/confirm-guest-registration                    │
+│  POST /api/v1/events/{id}/confirm-guest-registration                    │
 │  → { payment_url, access_token, refresh_token }                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -31,7 +35,7 @@
 ### Запрос
 
 ```
-POST /api/v1/public/events/{event_id}/register
+POST /api/v1/events/{event_id}/register
 Authorization: Bearer <access_token>
 Content-Type: application/json
 
@@ -78,7 +82,7 @@ Content-Type: application/json
 ### Шаг 1: Отправка email
 
 ```
-POST /api/v1/public/events/{event_id}/register
+POST /api/v1/events/{event_id}/register
 Content-Type: application/json
 
 {
@@ -108,7 +112,7 @@ Content-Type: application/json
 ### Шаг 2: Подтверждение кода
 
 ```
-POST /api/v1/public/events/{event_id}/confirm-guest-registration
+POST /api/v1/events/{event_id}/confirm-guest-registration
 Content-Type: application/json
 
 {
@@ -151,7 +155,7 @@ Content-Type: application/json
 ### Шаг 1: Отправка email
 
 ```
-POST /api/v1/public/events/{event_id}/register
+POST /api/v1/events/{event_id}/register
 Content-Type: application/json
 
 {
