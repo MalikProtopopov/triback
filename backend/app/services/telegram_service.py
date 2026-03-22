@@ -24,12 +24,22 @@ _AUTH_CODE_TTL = 600
 
 
 class TelegramService:
-    def __init__(self) -> None:
-        self._base = _BASE_URL.format(token=settings.TELEGRAM_BOT_TOKEN)
+    def __init__(
+        self,
+        bot_token: str | None = None,
+        owner_chat_id: int | None = None,
+    ) -> None:
+        self._token = bot_token or settings.TELEGRAM_BOT_TOKEN
+        self._owner_chat_id = owner_chat_id if owner_chat_id is not None else (
+            int(settings.TELEGRAM_CHANNEL_ID) if settings.TELEGRAM_CHANNEL_ID else 0
+        )
+        self._base = _BASE_URL.format(token=self._token) if self._token else ""
 
     # ── Bot API helpers ───────────────────────────────────────────
 
     async def send_message(self, chat_id: int, text: str) -> dict:
+        if not self._base:
+            raise ValueError("Telegram bot token not configured")
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{self._base}/sendMessage",
@@ -40,11 +50,13 @@ class TelegramService:
 
     async def add_to_channel(self, tg_user_id: int) -> None:
         """Unban (=add) user from the private Telegram channel."""
+        if not self._base or not self._owner_chat_id:
+            return
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{self._base}/unbanChatMember",
                 json={
-                    "chat_id": settings.TELEGRAM_CHANNEL_ID,
+                    "chat_id": self._owner_chat_id,
                     "user_id": tg_user_id,
                     "only_if_banned": True,
                 },
@@ -53,11 +65,13 @@ class TelegramService:
 
     async def remove_from_channel(self, tg_user_id: int) -> None:
         """Ban (=remove) user from the private Telegram channel."""
+        if not self._base or not self._owner_chat_id:
+            return
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{self._base}/banChatMember",
                 json={
-                    "chat_id": settings.TELEGRAM_CHANNEL_ID,
+                    "chat_id": self._owner_chat_id,
                     "user_id": tg_user_id,
                     "revoke_messages": False,
                 },

@@ -20,6 +20,7 @@ from app.api.v1.seo_admin import router as seo_admin_router
 from app.api.v1.settings_admin import router as settings_admin_router
 from app.api.v1.subscriptions import router as subscriptions_router
 from app.api.v1.telegram import router as telegram_router
+from app.api.v1.telegram_admin import router as telegram_admin_router
 from app.api.v1.voting import router as voting_router
 from app.api.v1.users_admin import router as users_admin_router
 from app.api.v1.webhooks import router as webhooks_router
@@ -39,6 +40,7 @@ router.include_router(events_admin_router, tags=["Admin - Events"])
 router.include_router(content_admin_router, tags=["Admin - Content"])
 router.include_router(content_blocks_admin_router, tags=["Admin - Content Blocks"])
 router.include_router(settings_admin_router, tags=["Admin - Settings"])
+router.include_router(telegram_admin_router, tags=["Admin - Telegram"])
 router.include_router(certificates_admin_router, tags=["Admin - Certificates"])
 router.include_router(doctors_admin_router, tags=["Admin - Doctors"])
 router.include_router(payments_admin_router, tags=["Admin - Payments"])

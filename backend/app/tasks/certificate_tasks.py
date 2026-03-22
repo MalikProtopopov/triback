@@ -39,16 +39,22 @@ async def generate_member_certificate_task(doctor_profile_id: str, year: int) ->
             year=year,
         )
         try:
-            from app.core.config import settings as app_settings
+            from app.core.database import AsyncSessionLocal
+            from app.services.telegram_integration_service import get_telegram_config
             from app.services.telegram_service import TelegramService
 
-            if app_settings.TELEGRAM_BOT_TOKEN and app_settings.TELEGRAM_CHANNEL_ID:
-                tg = TelegramService()
-                await tg.send_message(
-                    int(app_settings.TELEGRAM_CHANNEL_ID),
-                    f"Ошибка генерации сертификата:\n"
-                    f"doctor_profile_id={doctor_profile_id}\nyear={year}",
-                )
+            async with AsyncSessionLocal() as db:
+                config = await get_telegram_config(db)
+                if config:
+                    tg = TelegramService(bot_token=config[0], owner_chat_id=config[1])
+                else:
+                    tg = TelegramService()
+                if tg._token and tg._owner_chat_id:
+                    await tg.send_message(
+                        int(tg._owner_chat_id),
+                        f"Ошибка генерации сертификата:\n"
+                        f"doctor_profile_id={doctor_profile_id}\nyear={year}",
+                    )
         except Exception:
             pass
         raise

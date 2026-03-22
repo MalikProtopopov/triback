@@ -31,9 +31,14 @@ class NotificationService:
 
     async def send_telegram(self, chat_id: int, text: str) -> None:
         """Stub: send Telegram message. Delegates to TelegramService."""
+        from app.services.telegram_integration_service import get_telegram_config
         from app.services.telegram_service import TelegramService
 
-        svc = TelegramService()
+        config = await get_telegram_config(self.db)
+        if config:
+            svc = TelegramService(bot_token=config[0], owner_chat_id=config[1])
+        else:
+            svc = TelegramService()
         await svc.send_message(chat_id, text)
 
     # ── Create notification record + dispatch ─────────────────────

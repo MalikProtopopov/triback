@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # Application
     DEBUG: bool = False
     SECRET_KEY: str = "change-me-in-production"
+    ENCRYPTION_KEY: str = ""  # Fernet base64 key for encrypting sensitive data (e.g. bot tokens)
     ALLOWED_HOSTS: Annotated[list[str], BeforeValidator(_parse_allowed_hosts)] = ["*"]
 
     # JWT (RS256)

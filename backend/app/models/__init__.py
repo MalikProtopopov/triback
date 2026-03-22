@@ -30,6 +30,7 @@ from app.models.profiles import (  # noqa: F401
     Specialization,
 )
 from app.models.site import SiteSetting  # noqa: F401
+from app.models.telegram_integration import TelegramIntegration  # noqa: F401
 from app.models.subscriptions import (  # noqa: F401
     Payment,
     Plan,
