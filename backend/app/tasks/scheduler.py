@@ -73,6 +73,14 @@ async def start_scheduler() -> None:
             name="sched_expiring_report",
         )
     )
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic(
+                "close_voting", close_expired_voting_sessions, 3600
+            ),
+            name="sched_close_voting",
+        )
+    )
     logger.info("scheduler_started", tasks=len(_scheduler_tasks))
 
 
@@ -167,6 +175,36 @@ async def deactivate_expired_subscriptions() -> int:
 
     logger.info("deactivate_expired_done", deactivated=deactivated)
     return deactivated
+
+
+@broker.task  # type: ignore[misc]
+async def close_expired_voting_sessions() -> int:
+    """Hourly: set status=closed for active voting sessions where ends_at < now."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.voting import VotingSession
+
+    now = datetime.now(UTC)
+    closed = 0
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(VotingSession).where(
+                and_(
+                    VotingSession.status == "active",
+                    VotingSession.ends_at < now,
+                )
+            )
+        )
+        expired_sessions = result.scalars().all()
+
+        for session in expired_sessions:
+            session.status = "closed"  # type: ignore[assignment]
+            closed += 1
+
+        await db.commit()
+
+    logger.info("close_expired_voting_sessions_done", closed=closed)
+    return closed
 
 
 @broker.task  # type: ignore[misc]

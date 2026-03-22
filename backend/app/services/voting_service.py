@@ -7,19 +7,37 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.enums import DoctorStatus, VotingSessionStatus
-from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
+from app.core.enums import DoctorStatus, SubscriptionStatus, VotingSessionStatus
+from app.core.exceptions import AppValidationError, ConflictError, ForbiddenError, NotFoundError
 from app.core.pagination import PaginatedResponse
 from app.models.profiles import DoctorProfile
+from app.models.subscriptions import Subscription
 from app.models.voting import Vote, VotingCandidate, VotingSession
 from app.services import file_service
 
 logger = structlog.get_logger(__name__)
+
+def _has_active_subscription() -> Any:
+    """Correlated subquery: doctor has active subscription (status=ACTIVE, ends_at OK)."""
+    return (
+        select(Subscription.id)
+        .where(
+            Subscription.user_id == DoctorProfile.user_id,
+            Subscription.status == SubscriptionStatus.ACTIVE,
+            or_(
+                Subscription.ends_at.is_(None),
+                Subscription.ends_at > func.now(),
+            ),
+        )
+        .correlate(DoctorProfile)
+        .exists()
+    )
+
 
 _VALID_STATUS_TRANSITIONS = {
     VotingSessionStatus.DRAFT: {VotingSessionStatus.ACTIVE, VotingSessionStatus.CANCELLED},
@@ -30,6 +48,29 @@ _VALID_STATUS_TRANSITIONS = {
 class VotingService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def _is_association_member(self, user_id: UUID) -> bool:
+        """True only if user is an ACTIVE doctor with an active subscription."""
+        dp = await self.db.execute(
+            select(DoctorProfile.id).where(
+                DoctorProfile.user_id == user_id,
+                DoctorProfile.status == DoctorStatus.ACTIVE,
+            ).limit(1)
+        )
+        if not dp.scalar_one_or_none():
+            return False
+
+        sub = await self.db.execute(
+            select(Subscription.id).where(
+                Subscription.user_id == user_id,
+                Subscription.status == SubscriptionStatus.ACTIVE,
+                or_(
+                    Subscription.ends_at.is_(None),
+                    Subscription.ends_at > func.now(),
+                ),
+            ).limit(1)
+        )
+        return sub.scalar_one_or_none() is not None
 
     # ── Public ────────────────────────────────────────────────────
 
@@ -101,6 +142,9 @@ class VotingService:
         now = datetime.now(UTC)
         if now < session.starts_at or now >= session.ends_at:
             raise AppValidationError("Voting period is over or not started yet")
+
+        if not await self._is_association_member(UUID(user_id)):
+            raise ForbiddenError("Голосовать могут только активные члены ассоциации")
 
         cand = await self.db.get(VotingCandidate, candidate_id)
         if not cand or cand.voting_session_id != session_id:
@@ -299,7 +343,8 @@ class VotingService:
         total_eligible = (
             await self.db.execute(
                 select(func.count(DoctorProfile.id)).where(
-                    DoctorProfile.status == DoctorStatus.ACTIVE
+                    DoctorProfile.status == DoctorStatus.ACTIVE,
+                    _has_active_subscription(),
                 )
             )
         ).scalar() or 0
