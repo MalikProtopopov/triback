@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     TELEGRAM_CHANNEL_ID: str = ""
     TELEGRAM_WEBHOOK_SECRET: str = ""
 
+    # API (для полных URL в ответах, например download_url сертификатов)
+    # Если пусто — возвращаются относительные пути (клиент должен добавить base)
+    PUBLIC_API_URL: str = ""
+
     # Frontend
     FRONTEND_URL: str = "https://trichology.ru"
     ADMIN_FRONTEND_URL: str = ""  # URL админки; если пусто — письма staff идут на FRONTEND_URL

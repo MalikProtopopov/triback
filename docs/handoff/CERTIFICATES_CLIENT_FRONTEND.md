@@ -49,7 +49,7 @@
 | `certificate_number` | string | Публичный номер сертификата |
 | `is_active` | bool | Всегда `true` в этом эндпоинте (неактивные фильтруются) |
 | `generated_at` | datetime | Дата генерации |
-| `download_url` | string | **Presigned URL** для скачивания PDF (TTL 1 час) |
+| `download_url` | string | **Полный URL** для скачивания PDF (требует авторизации). Если `PUBLIC_API_URL` не задан — относительный путь `/api/v1/certificates/{id}/download` |
 | `verify_url` | string | **Новое.** URL для верификации (ведёт на фронтенд) |
 
 ### Что делать на фронте

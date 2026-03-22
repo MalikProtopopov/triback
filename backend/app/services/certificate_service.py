@@ -95,7 +95,12 @@ class CertificateService:
                 if evt:
                     event_nested = {"id": str(evt.id), "title": evt.title}
 
-            download_url = f"/api/v1/certificates/{cert.id}/download"
+            api_base = (app_settings.PUBLIC_API_URL or "").rstrip("/")
+            download_url = (
+                f"{api_base}/api/v1/certificates/{cert.id}/download"
+                if api_base
+                else f"/api/v1/certificates/{cert.id}/download"
+            )
             verify_url = f"{qr_base.rstrip('/')}/certificates/verify/{cert.certificate_number}"
 
             items.append({

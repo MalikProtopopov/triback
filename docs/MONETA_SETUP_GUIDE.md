@@ -122,6 +122,13 @@ MONETA_RETURN_URL=https://trichologia.mediann.dev/subscription
 MONETA_FORM_VERSION=v3
 ```
 
+**Опционально** (для полных URL в ответах API, например ссылка на скачивание сертификата):
+```env
+# Тест: https://trihoback.mediann.dev  Прод: https://api.trichologia.ru
+PUBLIC_API_URL=https://trihoback.mediann.dev
+```
+Без `PUBLIC_API_URL` ссылка `download_url` в `GET /certificates` будет относительной — клиентский фронт должен сам добавить base URL.
+
 ### Пояснение каждой переменной
 
 | Переменная | Значение | Откуда взять |
