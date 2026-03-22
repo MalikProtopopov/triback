@@ -51,6 +51,7 @@ class DoctorPublicListItem(BaseModel):
     public_phone: str | None = None
     public_email: str | None = None
     slug: str | None = None
+    board_role: str | None = None
 
 
 class DoctorPublicDetailResponse(BaseModel):
@@ -68,6 +69,7 @@ class DoctorPublicDetailResponse(BaseModel):
     public_phone: str | None = None
     public_email: str | None = None
     slug: str | None = None
+    board_role: str | None = None
     seo: SeoNested | None = None
     content_blocks: list[ContentBlockPublicNested] = []
 

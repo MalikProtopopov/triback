@@ -52,6 +52,7 @@ class DoctorCatalogService:
         city_id: UUID | None = None,
         city_slug: str | None = None,
         specialization: str | None = None,
+        board_role: list[str] | None = None,
         search: str | None = None,
     ) -> dict[str, Any]:
         active_sub = _has_active_subscription()
@@ -79,6 +80,8 @@ class DoctorCatalogService:
 
         if city_id:
             filters.append(DoctorProfile.city_id == city_id)
+        if board_role and len(board_role) > 0:
+            filters.append(DoctorProfile.board_role.in_(board_role))
         if specialization:
             base = base.join(
                 Specialization, DoctorProfile.specialization_id == Specialization.id, isouter=True,
@@ -121,6 +124,7 @@ class DoctorCatalogService:
             public_phone=dp.public_phone,
             public_email=dp.public_email,
             slug=dp.slug,
+            board_role=dp.board_role,
         )
 
     async def get_doctor(self, identifier: str) -> DoctorPublicDetailResponse:
@@ -184,6 +188,7 @@ class DoctorCatalogService:
             public_phone=dp.public_phone,
             public_email=dp.public_email,
             slug=dp.slug,
+            board_role=dp.board_role,
             seo=seo,
             content_blocks=content_blocks,
         )

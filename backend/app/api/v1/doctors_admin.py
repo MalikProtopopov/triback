@@ -17,6 +17,7 @@ from app.schemas.doctor_admin import (
     AdminCreateDoctorRequest,
     AdminCreateDoctorResponse,
     ApproveDraftRequest,
+    DoctorBoardRoleUpdateRequest,
     DoctorDetailResponse,
     DoctorListItemResponse,
     ImportStartResponse,
@@ -51,6 +52,7 @@ async def list_doctors(
     offset: int = Query(0, ge=0),
     status: str | None = Query(None, description="active | pending_review | rejected | ..."),
     subscription_status: str | None = Query(None, description="active | expired | none"),
+    board_role: list[str] | None = Query(None, description="pravlenie, president"),
     city_id: UUID | None = Query(None),
     has_data_changed: bool | None = Query(None, description="Только с изменёнными данными"),
     search: str | None = Query(None, min_length=2),
@@ -68,6 +70,7 @@ async def list_doctors(
         offset=offset,
         status=status,
         subscription_status=subscription_status,
+        board_role=board_role,
         city_id=city_id,
         has_data_changed=has_data_changed,
         search=search,
@@ -96,6 +99,26 @@ async def create_doctor(
     """
     svc = DoctorAdminService(db)
     return await svc.create_doctor(body.model_dump())
+
+
+@router.patch(
+    "/doctors/{profile_id}",
+    response_model=DoctorDetailResponse,
+    summary="Обновить роль в правлении",
+    responses=error_responses(401, 403, 404),
+)
+async def update_doctor_board_role(
+    profile_id: UUID,
+    body: DoctorBoardRoleUpdateRequest,
+    payload: dict[str, Any] = ADMIN_MANAGER,
+    db: AsyncSession = Depends(get_db_session),
+) -> DoctorDetailResponse:
+    """Обновляет роль врача в правлении (pravlenie | president | null).
+
+    - **404** — профиль не найден
+    """
+    svc = DoctorAdminService(db)
+    return await svc.update_board_role(profile_id, body.board_role)
 
 
 @router.get(

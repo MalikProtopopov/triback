@@ -114,6 +114,7 @@ class DoctorListItemResponse(BaseModel):
     has_photo_in_draft: bool = False
     telegram_linked: bool = False
     tg_username: str | None = None
+    board_role: str | None = None
     created_at: datetime
 
 
@@ -149,7 +150,14 @@ class DoctorDetailResponse(BaseModel):
     content_blocks: list[ContentBlockNested] = []
     telegram_linked: bool = False
     tg_username: str | None = None
+    board_role: str | None = None
     created_at: datetime
+
+
+# ── Board role update ─────────────────────────────────────────────
+
+class DoctorBoardRoleUpdateRequest(BaseModel):
+    board_role: Literal["pravlenie", "president"] | None = None
 
 
 # ── Moderation actions ────────────────────────────────────────────
@@ -236,6 +244,7 @@ class PortalUserListItem(BaseModel):
     last_payment: PaymentNested | None = None
     telegram_linked: bool = False
     tg_username: str | None = None
+    board_role: str | None = None
     created_at: datetime
 
 
@@ -253,4 +262,5 @@ class PortalUserDetailResponse(BaseModel):
     payments: list[PaymentNested] = []
     telegram_linked: bool = False
     tg_username: str | None = None
+    board_role: str | None = None
     created_at: datetime

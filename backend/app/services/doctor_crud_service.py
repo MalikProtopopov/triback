@@ -163,6 +163,7 @@ class DoctorCrudService:
         offset: int = 0,
         status: str | None = None,
         subscription_status: str | None = None,
+        board_role: list[str] | None = None,
         city_id: UUID | None = None,
         has_data_changed: bool | None = None,
         search: str | None = None,
@@ -184,6 +185,8 @@ class DoctorCrudService:
 
         if status:
             filters.append(DoctorProfile.status == status)
+        if board_role and len(board_role) > 0:
+            filters.append(DoctorProfile.board_role.in_(board_role))
         if city_id:
             filters.append(DoctorProfile.city_id == city_id)
         if search and len(search) >= 2:
@@ -325,6 +328,7 @@ class DoctorCrudService:
                     has_photo_in_draft=dp.id in photo_draft_set,
                     telegram_linked=dp.user_id in tg_map,
                     tg_username=tg_map[dp.user_id].tg_username if dp.user_id in tg_map else None,
+                    board_role=dp.board_role,
                     created_at=dp.created_at,
                 )
             )
@@ -490,5 +494,15 @@ class DoctorCrudService:
             ],
             telegram_linked=tg_binding is not None,
             tg_username=tg_binding.tg_username if tg_binding else None,
+            board_role=dp.board_role,
             created_at=dp.created_at,
         )
+
+    async def update_board_role(
+        self, profile_id: UUID, board_role: str | None
+    ) -> DoctorDetailResponse:
+        dp = await self._get_profile_or_404(profile_id)
+        dp.board_role = board_role
+        await self.db.commit()
+        await self.db.refresh(dp)
+        return await self.get_doctor(profile_id)

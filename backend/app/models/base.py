@@ -251,3 +251,10 @@ EventRegistrationStatus = SAEnum(
     name="event_registration_status",
     native_enum=True,
 )
+
+BoardRole = SAEnum(
+    "pravlenie",
+    "president",
+    name="board_role",
+    native_enum=True,
+)

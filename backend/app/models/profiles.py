@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
     Base,
+    BoardRole,
     ChangeStatus,
     DoctorStatus,
     DocumentType,
@@ -63,6 +64,7 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
             "slug",
             unique=True,
         ),
+        Index("idx_doctor_profiles_board_role", "board_role"),
     )
 
     user_id: Mapped[UUID] = mapped_column(
@@ -100,6 +102,7 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     onboarding_submitted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    board_role: Mapped[str | None] = mapped_column(BoardRole, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="doctor_profile")  # type: ignore[name-defined]  # noqa: F821
     city: Mapped["City | None"] = relationship()  # type: ignore[name-defined]  # noqa: F821

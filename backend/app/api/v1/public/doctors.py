@@ -26,13 +26,15 @@ async def list_doctors(
     city_id: UUID | None = Query(None, description="Фильтр по UUID города"),
     city_slug: str | None = Query(None, description="Фильтр по slug города"),
     specialization: str | None = Query(None),
+    board_role: list[str] | None = Query(None, description="pravlenie, president"),
     search: str | None = Query(None, min_length=2, description="Поиск по ФИО (мин. 2 символа)"),
 ) -> dict:
     """Пагинированный список активных врачей с фильтрацией."""
     svc = DoctorCatalogService(db)
     return await svc.list_doctors(
         limit=limit, offset=offset, city_id=city_id,
-        city_slug=city_slug, specialization=specialization, search=search,
+        city_slug=city_slug, specialization=specialization,
+        board_role=board_role, search=search,
     )
 
 

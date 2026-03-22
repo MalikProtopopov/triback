@@ -45,6 +45,11 @@ class DoctorAdminService:
     async def get_doctor(self, profile_id: UUID) -> DoctorDetailResponse:
         return await self._crud.get_doctor(profile_id)
 
+    async def update_board_role(
+        self, profile_id: UUID, board_role: str | None
+    ) -> DoctorDetailResponse:
+        return await self._crud.update_board_role(profile_id, board_role)
+
     # ── Moderation ────────────────────────────────────────────────
 
     async def moderate(

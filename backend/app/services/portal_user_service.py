@@ -127,6 +127,7 @@ class PortalUserService:
             dp = dp_map.get(u.id)
             dp_id = dp.id if dp else None
             full_name = f"{dp.last_name} {dp.first_name}" if dp else None
+            board_role = dp.board_role if dp else None
 
             tg = tg_map.get(u.id)
             items.append(
@@ -140,6 +141,7 @@ class PortalUserService:
                     subscription=sub_map.get(u.id) if display_role == "doctor" else None,
                     telegram_linked=tg is not None,
                     tg_username=tg.tg_username if tg else None,
+                    board_role=board_role,
                     created_at=u.created_at,
                 )
             )
@@ -163,6 +165,7 @@ class PortalUserService:
         dp_id: UUID | None = None
         full_name: str | None = None
         dp_status: str | None = None
+        board_role: str | None = None
         sub_info: SubscriptionNested | None = None
         payments_list: list[PaymentNested] = []
 
@@ -175,6 +178,7 @@ class PortalUserService:
                 dp_id = dp.id
                 full_name = f"{dp.last_name} {dp.first_name}"
                 dp_status = dp.status
+                board_role = dp.board_role
                 sub_info = await self._latest_subscription_nested(user.id)
 
         pay_result = await self.db.execute(
@@ -206,5 +210,6 @@ class PortalUserService:
             payments=payments_list,
             telegram_linked=tg_binding is not None,
             tg_username=tg_binding.tg_username if tg_binding else None,
+            board_role=board_role,
             created_at=user.created_at,
         )
