@@ -111,9 +111,21 @@ async def moneta_pay_webhook(
     Верифицирует подпись MD5, активирует подписку или регистрацию.
     Возвращает `SUCCESS` или `FAIL` (plain text).
     """
+    forwarded = request.headers.get("x-forwarded-for")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+    if not client_ip and request.client:
+        client_ip = request.client.host
+    user_agent = request.headers.get("user-agent", "")
     params = await _collect_moneta_params(request)
-    logger.info("moneta_pay_request", params=params)
+    logger.info(
+        "moneta_pay_request",
+        method=request.method,
+        client_ip=client_ip,
+        user_agent=user_agent[:80] if user_agent else None,
+        params=params,
+    )
     mnt_operation_id = params.get("MNT_OPERATION_ID", "")
+    mnt_command = params.get("MNT_COMMAND", "")
 
     dedup_key = f"webhook:dedup:moneta:{mnt_operation_id}"
     if mnt_operation_id:
@@ -124,9 +136,13 @@ async def moneta_pay_webhook(
     provider = MonetaPaymentProvider()
     try:
         webhook_data = await provider.verify_webhook(params)
-    except ValueError:
-        logger.warning("moneta_signature_invalid", params=params)
+    except ValueError as e:
+        logger.warning("moneta_signature_invalid", reason=str(e), params=params)
         return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+
+    if mnt_command in ("CANCELLED_DEBIT", "CANCELLED_CREDIT"):
+        logger.info("moneta_cancelled_ignored", mnt_command=mnt_command)
+        return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
 
     try:
         payment_id = UUID(webhook_data.transaction_id)
@@ -135,7 +151,11 @@ async def moneta_pay_webhook(
         )
         payment = result.scalar_one_or_none()
         if not payment:
-            logger.warning("moneta_payment_not_found", transaction_id=webhook_data.transaction_id)
+            logger.warning(
+                "moneta_payment_not_found",
+                transaction_id=webhook_data.transaction_id,
+                mnt_operation_id=mnt_operation_id,
+            )
             if mnt_operation_id:
                 await redis.delete(dedup_key)
             return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")

@@ -16,6 +16,20 @@ def _make_signature(mnt_id: str, txn_id: str, op_id: str, amount: str, secret: s
     return _md5(mnt_id, txn_id, op_id, amount, "RUB", "", "", secret)
 
 
+def _make_signature_with_command(
+    mnt_command: str,
+    mnt_id: str,
+    txn_id: str,
+    op_id: str,
+    amount: str,
+    secret: str,
+) -> str:
+    """Signature for MNT_COMMAND format (DEBIT/CREDIT/AUTHORISE/CANCELLED_*)."""
+    return _md5(
+        mnt_command, mnt_id, txn_id, op_id, amount, "RUB", "", "", secret
+    )
+
+
 @pytest.fixture
 async def pending_payment(db_session: AsyncSession, doctor_user) -> Payment:
     plan = Plan(
@@ -75,6 +89,67 @@ async def test_moneta_pay_url_success(
     resp = await client.get("/api/v1/webhooks/moneta", params=params)
     assert resp.status_code == 200
     assert resp.text == "SUCCESS"
+
+
+@pytest.mark.anyio
+async def test_moneta_pay_url_with_mnt_command_debit(
+    client: AsyncClient,
+    pending_payment: Payment,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Pay URL with MNT_COMMAND=DEBIT uses formula with MNT_OPERATION_ID."""
+    monkeypatch.setattr("app.core.config.settings.MONETA_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr("app.core.config.settings.MONETA_MNT_ID", "mnt-1")
+
+    sig = _make_signature_with_command(
+        "DEBIT", "mnt-1", str(pending_payment.id), "op-456", "15000.00", "test-secret"
+    )
+    params = {
+        "MNT_COMMAND": "DEBIT",
+        "MNT_ID": "mnt-1",
+        "MNT_TRANSACTION_ID": str(pending_payment.id),
+        "MNT_OPERATION_ID": "op-456",
+        "MNT_AMOUNT": "15000.00",
+        "MNT_CURRENCY_CODE": "RUB",
+        "MNT_SUBSCRIBER_ID": "",
+        "MNT_TEST_MODE": "",
+        "MNT_SIGNATURE": sig,
+    }
+    resp = await client.get("/api/v1/webhooks/moneta", params=params)
+    assert resp.status_code == 200
+    assert resp.text == "SUCCESS"
+
+
+@pytest.mark.anyio
+async def test_moneta_pay_url_cancelled_debit_returns_success(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    pending_payment: Payment,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """CANCELLED_DEBIT returns SUCCESS but does not activate payment."""
+    monkeypatch.setattr("app.core.config.settings.MONETA_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr("app.core.config.settings.MONETA_MNT_ID", "mnt-1")
+
+    sig = _make_signature_with_command(
+        "CANCELLED_DEBIT", "mnt-1", str(pending_payment.id), "op-789", "15000.00", "test-secret"
+    )
+    params = {
+        "MNT_COMMAND": "CANCELLED_DEBIT",
+        "MNT_ID": "mnt-1",
+        "MNT_TRANSACTION_ID": str(pending_payment.id),
+        "MNT_OPERATION_ID": "op-789",
+        "MNT_AMOUNT": "15000.00",
+        "MNT_CURRENCY_CODE": "RUB",
+        "MNT_SUBSCRIBER_ID": "",
+        "MNT_TEST_MODE": "",
+        "MNT_SIGNATURE": sig,
+    }
+    resp = await client.get("/api/v1/webhooks/moneta", params=params)
+    assert resp.status_code == 200
+    assert resp.text == "SUCCESS"
+    await db_session.refresh(pending_payment)
+    assert pending_payment.status == "pending"
 
 
 @pytest.mark.anyio
