@@ -76,6 +76,7 @@ class MonetaPaymentProvider(PaymentProvider):
         metadata: dict[str, Any] | None = None,
     ) -> CreatePaymentResult:
         invoice: dict[str, Any] = {
+            "payer": "card",
             "payee": self._payee_account,
             "amount": float(total_amount),
             "clientTransaction": transaction_id,

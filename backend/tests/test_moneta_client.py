@@ -66,7 +66,7 @@ async def test_create_invoice_success(provider: MonetaPaymentProvider):
             idempotency_key="idem-001",
         )
     assert result.external_id == "328498"
-    assert "operationId=328498" in result.payment_url
+    assert "MNT_TRANSACTION_ID=txn-001" in result.payment_url
     assert "version=v3" in result.payment_url
 
 
@@ -97,6 +97,7 @@ async def test_create_invoice_sends_correct_envelope(provider: MonetaPaymentProv
     assert envelope["Header"]["Security"]["UsernameToken"]["Username"] == "test-user"
     assert envelope["Header"]["Security"]["UsernameToken"]["Password"] == "test-pass"
     body = envelope["Body"]["InvoiceRequest"]
+    assert body["payer"] == "card"
     assert body["payee"] == "12345678"
     assert body["amount"] == 500.0
     assert body["clientTransaction"] == "txn-envelope"
@@ -154,7 +155,9 @@ async def test_create_invoice_multiple_items(provider: MonetaPaymentProvider):
         )
     assert result.external_id == "67890"
     payload = (mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json"))
-    assert payload["Envelope"]["Body"]["InvoiceRequest"]["amount"] == 20000.0
+    body = payload["Envelope"]["Body"]["InvoiceRequest"]
+    assert body["payer"] == "card"
+    assert body["amount"] == 20000.0
 
 
 @pytest.mark.anyio

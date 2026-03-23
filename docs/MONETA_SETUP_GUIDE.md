@@ -208,6 +208,18 @@ Expiry date — любая будущая, CVV — любой 3-значный.
 
 ---
 
+## Troubleshooting Pay URL
+
+Если Pay URL не получает уведомления от Moneta (статус платежа не обновляется), проверьте:
+
+1. **Pay URL в ЛК Moneta** должен быть **только** `https://trihoback.mediann.dev/api/v1/webhooks/moneta` — **не** `http://` (301 redirect нарушает требования Moneta).
+2. **Код проверки целостности данных** в ЛК и `MONETA_WEBHOOK_SECRET` в `/opt/triback/.env.prod` должны совпадать **строго** (регистр, пробелы).
+3. Firewall / security groups: разрешить входящий трафик с IP `185.111.84.218` (kassa.payanyway.ru).
+
+Подробный чек-лист и команды диагностики — в [MONETA_WEBHOOK_TROUBLESHOOTING.md](MONETA_WEBHOOK_TROUBLESHOOTING.md). Пошаговый runbook: [MONETA_WEBHOOK_DIAGNOSTIC_RUNBOOK.md](MONETA_WEBHOOK_DIAGNOSTIC_RUNBOOK.md).
+
+---
+
 ## Контакты поддержки Moneta
 
 | | |

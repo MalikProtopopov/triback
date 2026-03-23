@@ -117,6 +117,22 @@ async def moneta_pay_webhook(
         client_ip = request.client.host
     user_agent = request.headers.get("user-agent", "")
     params = await _collect_moneta_params(request)
+
+    # Log WARNING for empty or malformed requests (once per 24h to avoid spam)
+    key_params = ("MNT_SIGNATURE", "MNT_OPERATION_ID", "MNT_TRANSACTION_ID")
+    has_key_params = all(params.get(k) for k in key_params)
+    if not params or not has_key_params:
+        dedup_warn_key = "webhook:moneta:empty_warn"
+        should_warn = await redis.set(dedup_warn_key, "1", ex=_DEDUP_TTL, nx=True)
+        if should_warn:
+            logger.warning(
+                "moneta_pay_request_empty_or_malformed",
+                method=request.method,
+                client_ip=client_ip,
+                params_keys=list(params.keys()) if params else [],
+                missing=[] if not params else [k for k in key_params if not params.get(k)],
+            )
+
     logger.info(
         "moneta_pay_request",
         method=request.method,
