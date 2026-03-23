@@ -30,8 +30,11 @@ router = APIRouter(prefix="/auth")
 
 REFRESH_COOKIE_KEY = "refresh_token"
 REFRESH_COOKIE_KEY_ADMIN = "refresh_token_admin"
+ACCESS_TOKEN_COOKIE_KEY = "access_token"
 REFRESH_COOKIE_MAX_AGE = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
+ACCESS_TOKEN_COOKIE_MAX_AGE = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+ACCESS_TOKEN_COOKIE_PATH = "/api/v1"
 
 
 def _is_admin_origin(request: Request) -> bool:
@@ -62,6 +65,29 @@ def _clear_refresh_cookie(response: Response, key: str = REFRESH_COOKIE_KEY) -> 
     if settings.COOKIE_DOMAIN:
         kwargs["domain"] = settings.COOKIE_DOMAIN
     response.delete_cookie(key=key, **kwargs)
+
+
+def _set_access_token_cookie(response: Response, token: str) -> None:
+    """Set access_token cookie so cross-origin API requests with credentials get auth.
+    SameSite=None allows cookie to be sent from frontend on different subdomain.
+    """
+    kwargs: dict = dict(
+        httponly=True,
+        secure=True,
+        samesite="none",  # Required for cross-origin requests (e.g. trichologia.mediann.dev → trihoback.mediann.dev)
+        path=ACCESS_TOKEN_COOKIE_PATH,
+        max_age=ACCESS_TOKEN_COOKIE_MAX_AGE,
+    )
+    if settings.COOKIE_DOMAIN:
+        kwargs["domain"] = settings.COOKIE_DOMAIN
+    response.set_cookie(key=ACCESS_TOKEN_COOKIE_KEY, value=token, **kwargs)
+
+
+def _clear_access_token_cookie(response: Response) -> None:
+    kwargs: dict = dict(httponly=True, secure=True, samesite="none", path=ACCESS_TOKEN_COOKIE_PATH)
+    if settings.COOKIE_DOMAIN:
+        kwargs["domain"] = settings.COOKIE_DOMAIN
+    response.delete_cookie(key=ACCESS_TOKEN_COOKIE_KEY, **kwargs)
 
 
 @router.post(
@@ -157,6 +183,7 @@ async def login(
     tokens = await svc.login(email=data.email, password=data.password)
     cookie_key = _get_refresh_cookie_key(request)
     _set_refresh_cookie(response, tokens["refresh_token"], key=cookie_key)
+    _set_access_token_cookie(response, tokens["access_token"])
     return TokenResponse(
         access_token=tokens["access_token"],
         role=tokens["role"],
@@ -191,6 +218,7 @@ async def refresh(
     svc = AuthService(db, redis)
     tokens = await svc.refresh_tokens(token)
     _set_refresh_cookie(response, tokens["refresh_token"], key=cookie_key)
+    _set_access_token_cookie(response, tokens["access_token"])
     return TokenResponse(
         access_token=tokens["access_token"],
         role=tokens["role"],
@@ -237,6 +265,7 @@ async def logout(
             await svc.logout(token)
     _clear_refresh_cookie(response, key=REFRESH_COOKIE_KEY)
     _clear_refresh_cookie(response, key=REFRESH_COOKIE_KEY_ADMIN)
+    _clear_access_token_cookie(response)
     return MessageResponse(message="Вы вышли из системы")
 
 

@@ -89,6 +89,45 @@ async def test_register_with_x_access_token_header(
     assert data["action"] is None
 
 
+async def test_register_with_access_token_cookie(
+    client: AsyncClient,
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    """access_token cookie works as fallback when Authorization is not sent."""
+    from app.core.security import create_access_token
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_cookie@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=2000, member_price=1000)
+    await db_session.commit()
+
+    token = create_access_token(doctor_user.id, "doctor")
+    cookies = {"access_token": token}
+
+    mock_result = CreatePaymentResult(
+        external_id="op_ck_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/ck",
+    )
+
+    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
+        resp = await client.post(
+            f"/api/v1/events/{event.id}/register",
+            cookies=cookies,
+            json={"tariff_id": str(tariff.id), "idempotency_key": uuid4().hex},
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["payment_url"] is not None
+    assert data["action"] is None
+
+
 async def test_register_member_gets_discount(
     client: AsyncClient,
     auth_headers_doctor: dict[str, str],

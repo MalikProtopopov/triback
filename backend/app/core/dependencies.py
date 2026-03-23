@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, Header, Query
+from fastapi import Cookie, Depends, Header, Query
 from fastapi.security import OAuth2PasswordBearer
 
 from app.core.exceptions import UnauthorizedError
@@ -11,16 +11,22 @@ from app.core.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
+ACCESS_TOKEN_COOKIE_KEY = "access_token"
+
 
 def _extract_token(
     bearer: str | None = Depends(oauth2_scheme),
     x_access_token: str | None = Header(None, alias="X-Access-Token"),
+    access_token_cookie: str | None = Cookie(None, alias=ACCESS_TOKEN_COOKIE_KEY),
 ) -> str | None:
-    """Get token from Authorization: Bearer or X-Access-Token header."""
+    """Get token from Authorization, X-Access-Token header, or access_token cookie."""
     if bearer:
         return bearer
     if x_access_token:
         t = x_access_token.strip()
+        return t if t else None
+    if access_token_cookie:
+        t = access_token_cookie.strip()
         return t if t else None
     return None
 

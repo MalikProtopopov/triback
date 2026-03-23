@@ -6,25 +6,19 @@
 
 ## 1. Передача токена при запросе регистрации
 
-**Критично.** Если пользователь авторизован, токен **обязательно** должен уходить с запросом `POST /api/v1/events/{id}/register`. Без токена бэкенд вернёт 422 «Email is required for guest registration».
+**Критично.** Если пользователь авторизован, бэкенд должен получить токен. Без него — 422 «Email is required for guest registration».
 
-### Вариант A (предпочтительный)
+### Откуда бэкенд берёт токен
 
-```
-Authorization: Bearer <access_token>
-```
-
-### Вариант B (если Authorization недоступна)
-
-```
-X-Access-Token: <access_token>
-```
+1. **Authorization: Bearer** — заголовок
+2. **X-Access-Token** — заголовок  
+3. **Cookie `access_token`** — при логине и refresh бэкенд выставляет эту cookie
 
 ### Что сделать на фронте
 
-- Использовать **общий HTTP-клиент** (axios, fetch и т.п.) с interceptor, который добавляет `Authorization: Bearer <token>` ко **всем** запросам к API, когда пользователь залогинен.
-- Убедиться, что страница мероприятия использует **тот же** клиент, что и остальной личный кабинет — не отдельный fetch без авторизации.
-- При cross-origin запросах (фронт и API на разных доменах) указывать `credentials: 'include'` или аналог, чтобы браузер отправлял заголовки.
+**Вариант A (рекомендуемый):** Указать `credentials: 'include'` (fetch) или `withCredentials: true` (axios) — cookie `access_token` уйдёт автоматически.
+
+**Вариант B:** Interceptor, добавляющий `Authorization: Bearer <token>` ко всем запросам к API.
 
 ---
 
@@ -32,7 +26,7 @@ X-Access-Token: <access_token>
 
 | Пользователь залогинен? | Что показывать | Что отправлять |
 |-------------------------|----------------|----------------|
-| Да | Сразу кнопку «Оплатить» / выбор тарифа | `tariff_id`, `idempotency_key`, **+ заголовок Authorization** |
+| Да | Сразу кнопку «Оплатить» / выбор тарифа | `tariff_id`, `idempotency_key` + `credentials: include` или Authorization |
 | Нет | Поле email → затем форма OTP | `tariff_id`, `idempotency_key`, `guest_email` |
 
 ---
