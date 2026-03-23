@@ -89,7 +89,7 @@ class DoctorAdminService:
 
     # ── Communication ─────────────────────────────────────────────
 
-    async def send_reminder(self, profile_id: UUID, message: str | None = None) -> None:
+    async def send_reminder(self, profile_id: UUID, message: str | None = None) -> bool:
         return await self._comms.send_reminder(profile_id, message)
 
     async def send_email(self, profile_id: UUID, subject: str, body: str) -> None:

@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.models.profiles import DoctorProfile
-from app.models.users import User
+from app.models.users import TelegramBinding, User
 from app.tasks.email_tasks import send_custom_email, send_reminder_notification
+from app.tasks.telegram_tasks import notify_user_manual_reminder
 
 
 class DoctorCommunicationService:
@@ -28,12 +29,29 @@ class DoctorCommunicationService:
 
     async def send_reminder(
         self, profile_id: UUID, message: str | None = None
-    ) -> None:
+    ) -> bool:
+        """Send reminder via email and Telegram (if linked). Returns True if Telegram is linked."""
         dp = await self._get_profile_or_404(profile_id)
         user = await self.db.get(User, dp.user_id)
         if not user:
             raise NotFoundError("User not found")
+
         await send_reminder_notification.kiq(user.email, message)
+
+        binding = (
+            await self.db.execute(
+                select(TelegramBinding).where(TelegramBinding.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+        telegram_linked = (
+            binding is not None
+            and binding.tg_chat_id is not None
+        )
+
+        if telegram_linked:
+            await notify_user_manual_reminder.kiq(str(user.id), message)
+
+        return bool(telegram_linked)
 
     async def send_email(
         self, profile_id: UUID, subject: str, body: str

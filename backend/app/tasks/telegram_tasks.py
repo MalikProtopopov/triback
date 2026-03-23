@@ -148,6 +148,13 @@ async def notify_user_receipt_available(user_id: str, amount: float) -> None:
 
 
 @broker.task  # type: ignore[misc]
+async def notify_user_manual_reminder(user_id: str, message: str | None = None) -> bool:
+    """Send manual reminder from admin to user's Telegram. Returns True if sent."""
+    text = message if message else "Ваша подписка скоро истекает. Не забудьте продлить членство."
+    return await _send_to_user(user_id, text)
+
+
+@broker.task  # type: ignore[misc]
 async def notify_user_subscription_expiring(user_id: str, days_left: int) -> None:
     """Notify user via Telegram that their subscription is expiring soon."""
     text = (

@@ -222,13 +222,17 @@ async def send_reminder(
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
-    """Отправляет напоминание врачу (уведомление).
+    """Отправляет напоминание врачу (email + Telegram при наличии привязки).
 
     - **404** — профиль не найден
     """
     svc = DoctorAdminService(db)
-    await svc.send_reminder(profile_id, body.message)
-    return MessageResponse(message="Напоминание отправлено")
+    telegram_sent = await svc.send_reminder(profile_id, body.message)
+    if telegram_sent:
+        msg = "Напоминание отправлено в Telegram"
+    else:
+        msg = "Telegram не привязан, сообщение в Telegram не дойдёт. Напоминание отправлено на email."
+    return MessageResponse(message=msg)
 
 
 @router.post(
