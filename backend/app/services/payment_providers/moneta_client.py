@@ -234,7 +234,7 @@ class MonetaPaymentProvider(PaymentProvider):
         then calls Check URL and Pay URL as documented.
         """
         base = self._assistant_url
-        test_mode = "1" if self._demo_mode else "0"
+        test_mode = "0"
 
         url = f"{base}?MNT_ID={self._mnt_id}"
         url += f"&MNT_TRANSACTION_ID={transaction_id}"
