@@ -127,7 +127,7 @@ async def test_moneta_pay_url_cancelled_debit_returns_success(
     pending_payment: Payment,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """CANCELLED_DEBIT returns SUCCESS but does not activate payment."""
+    """CANCELLED_DEBIT returns SUCCESS and cancels the payment (so user can re-register)."""
     monkeypatch.setattr("app.core.config.settings.MONETA_WEBHOOK_SECRET", "test-secret")
     monkeypatch.setattr("app.core.config.settings.MONETA_MNT_ID", "mnt-1")
 
@@ -149,7 +149,7 @@ async def test_moneta_pay_url_cancelled_debit_returns_success(
     assert resp.status_code == 200
     assert resp.text == "SUCCESS"
     await db_session.refresh(pending_payment)
-    assert pending_payment.status == "pending"
+    assert pending_payment.status == "failed"
 
 
 @pytest.mark.anyio

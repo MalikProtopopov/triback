@@ -157,7 +157,22 @@ async def moneta_pay_webhook(
         return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
 
     if mnt_command in ("CANCELLED_DEBIT", "CANCELLED_CREDIT"):
-        logger.info("moneta_cancelled_ignored", mnt_command=mnt_command)
+        try:
+            payment_id = UUID(webhook_data.transaction_id)
+            result = await db.execute(
+                select(Payment).where(Payment.id == payment_id).with_for_update()
+            )
+            payment = result.scalar_one_or_none()
+            if payment:
+                svc = PaymentWebhookService(db)
+                await svc._handle_payment_canceled(payment)
+                logger.info(
+                    "moneta_payment_cancelled",
+                    payment_id=str(payment_id),
+                    mnt_command=mnt_command,
+                )
+        except Exception:
+            logger.exception("moneta_cancelled_webhook_error", mnt_command=mnt_command)
         return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
 
     try:

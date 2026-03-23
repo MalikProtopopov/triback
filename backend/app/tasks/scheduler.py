@@ -312,6 +312,7 @@ async def expire_stale_pending_payments() -> int:
     from app.core.config import settings
     from app.core.database import AsyncSessionLocal
     from app.models.subscriptions import Payment, Subscription
+    from app.services.payment_webhook_service import PaymentWebhookService
 
     now = datetime.now(UTC)
     fallback_cutoff = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
@@ -331,6 +332,7 @@ async def expire_stale_pending_payments() -> int:
         )
         stale_payments = result.scalars().all()
 
+        webhook_svc = PaymentWebhookService(db)
         for payment in stale_payments:
             payment.status = "expired"  # type: ignore[assignment]
             expired_count += 1
@@ -339,6 +341,9 @@ async def expire_stale_pending_payments() -> int:
                 sub = await db.get(Subscription, payment.subscription_id)
                 if sub and sub.status == "pending_payment":
                     sub.status = "cancelled"  # type: ignore[assignment]
+
+            if payment.event_registration_id:
+                await webhook_svc._cancel_event_registration(payment)
 
         await db.commit()
 

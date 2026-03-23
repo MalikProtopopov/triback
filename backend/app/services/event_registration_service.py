@@ -11,7 +11,7 @@ from uuid import UUID
 
 import structlog
 from redis.asyncio import Redis
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -152,8 +152,70 @@ class EventRegistrationService:
                 .limit(1)
             )
         ).scalar_one_or_none()
+
         if existing_reg:
-            raise ConflictError("You have already registered for this event with this tariff")
+            if existing_reg.status == EventRegistrationStatus.CONFIRMED:
+                raise ConflictError("You have already registered for this event with this tariff")
+
+            if existing_reg.status == EventRegistrationStatus.CANCELLED:
+                reuse_body = RegisterForEventRequest(
+                    tariff_id=body.tariff_id,
+                    idempotency_key=body.idempotency_key,
+                    guest_full_name=body.guest_full_name,
+                    guest_email=body.email,
+                    guest_workplace=body.guest_workplace,
+                    guest_specialization=body.guest_specialization,
+                    fiscal_email=body.fiscal_email,
+                )
+                return await self._reuse_registration(
+                    event, tariff, existing_reg, user_id, reuse_body,
+                    increment_seats=True, include_tokens=True,
+                )
+
+            if existing_reg.status == EventRegistrationStatus.PENDING:
+                now = datetime.now(UTC)
+                fallback = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
+                pending_pay = (
+                    await self.db.execute(
+                        select(Payment).where(
+                            Payment.event_registration_id == existing_reg.id,
+                            Payment.status == PaymentStatus.PENDING,
+                            or_(
+                                and_(
+                                    Payment.expires_at.isnot(None),
+                                    Payment.expires_at > now,
+                                ),
+                                and_(
+                                    Payment.expires_at.is_(None),
+                                    Payment.created_at > fallback,
+                                ),
+                            ),
+                        ).limit(1)
+                    )
+                ).scalar_one_or_none()
+                if pending_pay and pending_pay.external_payment_url:
+                    access_token, refresh_token = await self._issue_tokens(user_id)
+                    return RegisterForEventResponse(
+                        registration_id=existing_reg.id,
+                        payment_url=pending_pay.external_payment_url,
+                        applied_price=float(existing_reg.applied_price),
+                        is_member_price=existing_reg.is_member_price,
+                        access_token=access_token,
+                        refresh_token=refresh_token,
+                    )
+                reuse_body = RegisterForEventRequest(
+                    tariff_id=body.tariff_id,
+                    idempotency_key=body.idempotency_key,
+                    guest_full_name=body.guest_full_name,
+                    guest_email=body.email,
+                    guest_workplace=body.guest_workplace,
+                    guest_specialization=body.guest_specialization,
+                    fiscal_email=body.fiscal_email,
+                )
+                return await self._reuse_registration(
+                    event, tariff, existing_reg, user_id, reuse_body,
+                    increment_seats=False, include_tokens=True,
+                )
 
         is_member = await self._is_association_member(user_id)
         applied_price = float(tariff.member_price if is_member else tariff.price)
@@ -246,8 +308,47 @@ class EventRegistrationService:
                 .limit(1)
             )
         ).scalar_one_or_none()
+
         if existing_reg:
-            raise ConflictError("You have already registered for this event with this tariff")
+            if existing_reg.status == EventRegistrationStatus.CONFIRMED:
+                raise ConflictError("You have already registered for this event with this tariff")
+
+            if existing_reg.status == EventRegistrationStatus.CANCELLED:
+                return await self._reuse_registration(
+                    event, tariff, existing_reg, user_id, body, increment_seats=True
+                )
+
+            if existing_reg.status == EventRegistrationStatus.PENDING:
+                now = datetime.now(UTC)
+                fallback = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
+                pending_pay = (
+                    await self.db.execute(
+                        select(Payment).where(
+                            Payment.event_registration_id == existing_reg.id,
+                            Payment.status == PaymentStatus.PENDING,
+                            or_(
+                                and_(
+                                    Payment.expires_at.isnot(None),
+                                    Payment.expires_at > now,
+                                ),
+                                and_(
+                                    Payment.expires_at.is_(None),
+                                    Payment.created_at > fallback,
+                                ),
+                            ),
+                        ).limit(1)
+                    )
+                ).scalar_one_or_none()
+                if pending_pay and pending_pay.external_payment_url:
+                    return RegisterForEventResponse(
+                        registration_id=existing_reg.id,
+                        payment_url=pending_pay.external_payment_url,
+                        applied_price=float(existing_reg.applied_price),
+                        is_member_price=existing_reg.is_member_price,
+                    )
+                return await self._reuse_registration(
+                    event, tariff, existing_reg, user_id, body, increment_seats=False
+                )
 
         user = await self.db.get(User, user_id)
         user_email = user.email if user else None
@@ -322,6 +423,90 @@ class EventRegistrationService:
             applied_price=applied_price,
             is_member_price=is_member_price,
         )
+
+    async def _reuse_registration(
+        self,
+        event: Event,
+        tariff: EventTariff,
+        reg: EventRegistration,
+        user_id: UUID,
+        body: RegisterForEventRequest,
+        *,
+        increment_seats: bool,
+        include_tokens: bool = False,
+    ) -> RegisterForEventResponse:
+        """Reuse a CANCELLED or PENDING (with dead payment) registration for new payment."""
+        from app.models.users import User
+
+        user = await self.db.get(User, user_id)
+        user_email = user.email if user else None
+
+        is_member = await self._is_association_member(user_id)
+        applied_price = float(tariff.member_price if is_member else tariff.price)
+        is_member_price = is_member
+
+        reg.status = EventRegistrationStatus.PENDING  # type: ignore[assignment]
+        reg.applied_price = applied_price
+        reg.is_member_price = is_member_price
+        reg.guest_full_name = body.guest_full_name
+        reg.guest_email = body.guest_email
+        reg.guest_workplace = body.guest_workplace
+        reg.guest_specialization = body.guest_specialization
+        reg.fiscal_email = body.fiscal_email
+        await self.db.flush()
+
+        if increment_seats:
+            inc_result = await self.db.execute(
+                update(EventTariff)
+                .where(
+                    EventTariff.id == tariff.id,
+                    or_(
+                        EventTariff.seats_limit.is_(None),
+                        EventTariff.seats_taken < EventTariff.seats_limit,
+                    ),
+                )
+                .values(seats_taken=EventTariff.seats_taken + 1)
+            )
+            if inc_result.rowcount == 0:
+                raise ConflictError("No seats available")
+            await self.db.flush()
+
+        payment = Payment(
+            user_id=user_id,
+            amount=applied_price,
+            product_type="event",
+            payment_provider=settings.PAYMENT_PROVIDER,
+            status=PaymentStatus.PENDING,
+            event_registration_id=reg.id,
+            idempotency_key=body.idempotency_key,
+            description=f"{event.title} — {tariff.name}",
+            expires_at=datetime.now(UTC) + timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS),
+        )
+        self.db.add(payment)
+        await self.db.flush()
+
+        payment_url = await self._process_payment(
+            payment,
+            event,
+            tariff,
+            reg,
+            applied_price,
+            user_email or body.guest_email or "",
+            body.fiscal_email,
+        )
+        await self.db.commit()
+
+        resp = RegisterForEventResponse(
+            registration_id=reg.id,
+            payment_url=payment_url,
+            applied_price=applied_price,
+            is_member_price=is_member_price,
+        )
+        if include_tokens:
+            access_token, refresh_token = await self._issue_tokens(user_id)
+            resp.access_token = access_token
+            resp.refresh_token = refresh_token
+        return resp
 
     async def _process_payment(
         self,

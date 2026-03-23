@@ -5,8 +5,10 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.events import EventTariff
 from app.models.users import User
 from app.services.payment_providers.base import CreatePaymentResult
 
@@ -580,3 +582,74 @@ async def test_webhook_event_payment_succeeded(
         headers={"x-forwarded-for": "185.71.76.1"},
     )
     assert resp.status_code == 200
+
+
+async def test_register_after_cancelled_reuses_registration(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    """After payment/registration cancelled, user can register again and gets new payment_url."""
+    from app.core.enums import EventRegistrationStatus
+    from app.models.events import EventRegistration
+    from app.models.subscriptions import Payment
+    from tests.factories import create_event, create_event_tariff, create_user
+
+    admin = await create_user(db_session, email="evt_admin_reuse@test.com")
+    event = await create_event(db_session, created_by=admin)
+    tariff = await create_event_tariff(db_session, event=event, price=3000, member_price=1500)
+    await db_session.commit()
+
+    mock_result = CreatePaymentResult(
+        external_id="op_reuse1_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/reuse1",
+    )
+
+    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result)
+        mock_gp.return_value = mock_provider
+
+        resp = await client.post(
+            f"/api/v1/events/{event.id}/register",
+            headers=auth_headers_doctor,
+            json={"tariff_id": str(tariff.id), "idempotency_key": "idem-reuse"},
+        )
+
+    assert resp.status_code == 201
+    reg_id = resp.json()["registration_id"]
+
+    reg = await db_session.get(EventRegistration, reg_id)
+    reg.status = EventRegistrationStatus.CANCELLED  # type: ignore[assignment]
+    result = await db_session.execute(
+        select(Payment).where(Payment.event_registration_id == reg.id)
+    )
+    for p in result.scalars().all():
+        p.status = "failed"  # type: ignore[assignment]
+    tariff = await db_session.get(EventTariff, tariff.id)
+    if tariff.seats_taken > 0:
+        tariff.seats_taken -= 1  # type: ignore[assignment]
+    await db_session.commit()
+
+    mock_result2 = CreatePaymentResult(
+        external_id="op_reuse2_" + uuid4().hex[:8],
+        payment_url="https://moneta.test/pay/reuse2",
+    )
+
+    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+        mock_provider = AsyncMock()
+        mock_provider.create_payment = AsyncMock(return_value=mock_result2)
+        mock_gp.return_value = mock_provider
+
+        resp2 = await client.post(
+            f"/api/v1/events/{event.id}/register",
+            headers=auth_headers_doctor,
+            json={"tariff_id": str(tariff.id), "idempotency_key": "idem-reuse2"},
+        )
+
+    assert resp2.status_code == 201
+    data = resp2.json()
+    assert data["registration_id"] == reg_id
+    assert data["payment_url"] == "https://moneta.test/pay/reuse2"
+    assert data["applied_price"] == 3000.0
