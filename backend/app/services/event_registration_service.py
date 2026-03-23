@@ -11,7 +11,7 @@ from uuid import UUID
 
 import structlog
 from redis.asyncio import Redis
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -173,36 +173,7 @@ class EventRegistrationService:
                 )
 
             if existing_reg.status == EventRegistrationStatus.PENDING:
-                now = datetime.now(UTC)
-                fallback = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
-                pending_pay = (
-                    await self.db.execute(
-                        select(Payment).where(
-                            Payment.event_registration_id == existing_reg.id,
-                            Payment.status == PaymentStatus.PENDING,
-                            or_(
-                                and_(
-                                    Payment.expires_at.isnot(None),
-                                    Payment.expires_at > now,
-                                ),
-                                and_(
-                                    Payment.expires_at.is_(None),
-                                    Payment.created_at > fallback,
-                                ),
-                            ),
-                        ).limit(1)
-                    )
-                ).scalar_one_or_none()
-                if pending_pay and pending_pay.external_payment_url:
-                    access_token, refresh_token = await self._issue_tokens(user_id)
-                    return RegisterForEventResponse(
-                        registration_id=existing_reg.id,
-                        payment_url=pending_pay.external_payment_url,
-                        applied_price=float(existing_reg.applied_price),
-                        is_member_price=existing_reg.is_member_price,
-                        access_token=access_token,
-                        refresh_token=refresh_token,
-                    )
+                # Always reuse: payment may have been cancelled/expired externally
                 reuse_body = RegisterForEventRequest(
                     tariff_id=body.tariff_id,
                     idempotency_key=body.idempotency_key,
@@ -319,33 +290,8 @@ class EventRegistrationService:
                 )
 
             if existing_reg.status == EventRegistrationStatus.PENDING:
-                now = datetime.now(UTC)
-                fallback = now - timedelta(hours=settings.PAYMENT_EXPIRATION_HOURS)
-                pending_pay = (
-                    await self.db.execute(
-                        select(Payment).where(
-                            Payment.event_registration_id == existing_reg.id,
-                            Payment.status == PaymentStatus.PENDING,
-                            or_(
-                                and_(
-                                    Payment.expires_at.isnot(None),
-                                    Payment.expires_at > now,
-                                ),
-                                and_(
-                                    Payment.expires_at.is_(None),
-                                    Payment.created_at > fallback,
-                                ),
-                            ),
-                        ).limit(1)
-                    )
-                ).scalar_one_or_none()
-                if pending_pay and pending_pay.external_payment_url:
-                    return RegisterForEventResponse(
-                        registration_id=existing_reg.id,
-                        payment_url=pending_pay.external_payment_url,
-                        applied_price=float(existing_reg.applied_price),
-                        is_member_price=existing_reg.is_member_price,
-                    )
+                # Always reuse: payment may have been cancelled/expired externally
+                # (webhook not processed, scheduler not run). Creates fresh payment.
                 return await self._reuse_registration(
                     event, tariff, existing_reg, user_id, body, increment_seats=False
                 )
