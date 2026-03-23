@@ -32,6 +32,9 @@
 
 Пользователь уже залогинен (есть Bearer token).
 
+**Важно:** При регистрации **обязательно** передайте токен, иначе будет 422 «Email is required».
+Фронт должен всегда добавлять токен к запросу, если пользователь залогинен.
+
 ### Запрос
 
 ```
@@ -43,6 +46,12 @@ Content-Type: application/json
   "tariff_id": "uuid-тарифа",
   "idempotency_key": "unique-key-123"
 }
+```
+
+Альтернатива (если `Authorization` по какой-то причине недоступна):
+
+```
+X-Access-Token: <access_token>
 ```
 
 Поля `guest_email`, `guest_full_name`, `guest_workplace`, `guest_specialization`, `fiscal_email` — **опциональны**, можно не передавать.
