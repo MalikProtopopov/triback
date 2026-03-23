@@ -1,0 +1,11 @@
+# Override to run with host code (no rebuild needed when Docker Hub rate limited).
+# Usage: docker compose -f docker-compose.prod.yml -f docker-compose.vol-mount.yml up -d backend worker
+services:
+  backend:
+    volumes:
+      - ./backend/keys:/app/keys
+      - ./backend/app:/app/app:ro
+  worker:
+    volumes:
+      - ./backend/keys:/app/keys
+      - ./backend/app:/app/app:ro
