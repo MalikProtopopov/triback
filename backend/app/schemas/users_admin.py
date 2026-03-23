@@ -6,7 +6,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
-
 STAFF_ROLES = Literal["admin", "manager", "accountant"]
 
 _ROLE_DISPLAY: dict[str, str] = {

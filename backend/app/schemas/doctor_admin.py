@@ -1,7 +1,7 @@
 """Pydantic schemas for admin doctor management endpoints."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -33,7 +33,7 @@ class DocumentNested(BaseModel):
 
 class PendingDraftNested(BaseModel):
     id: UUID
-    changes: dict
+    changes: dict[str, Any]
     changed_fields: list[str]
     status: str
     moderation_comment: str | None = None

@@ -20,6 +20,7 @@ from app.models.events import (  # noqa: F401
     EventRegistration,
     EventTariff,
 )
+from app.models.payment_webhook_inbox import PaymentWebhookInbox  # noqa: F401
 from app.models.profiles import (  # noqa: F401
     AuditLog,
     DoctorDocument,
@@ -30,13 +31,13 @@ from app.models.profiles import (  # noqa: F401
     Specialization,
 )
 from app.models.site import SiteSetting  # noqa: F401
-from app.models.telegram_integration import TelegramIntegration  # noqa: F401
 from app.models.subscriptions import (  # noqa: F401
     Payment,
     Plan,
     Receipt,
     Subscription,
 )
+from app.models.telegram_integration import TelegramIntegration  # noqa: F401
 from app.models.users import (  # noqa: F401
     Notification,
     NotificationTemplate,

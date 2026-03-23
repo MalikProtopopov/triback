@@ -5,11 +5,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Path, Request
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db_session
 from app.core.openapi import error_responses
+from app.core.rate_limit import limiter
 from app.core.redis import get_redis
 from app.core.security import require_role
 from app.schemas.telegram import GenerateCodeResponse, TelegramBindingStatus
@@ -28,7 +30,7 @@ router = APIRouter(prefix="/telegram")
 async def get_binding_status(
     payload: dict[str, Any] = require_role("doctor", "user"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Показывает, привязан ли Telegram-аккаунт к профилю.
 
     - **401** — не авторизован
@@ -48,8 +50,8 @@ async def get_binding_status(
 async def generate_code(
     payload: dict[str, Any] = require_role("doctor", "user"),
     db: AsyncSession = Depends(get_db_session),
-    redis=Depends(get_redis),
-) -> dict:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     """Генерирует одноразовый код для привязки Telegram через бота.
 
     - **401** — не авторизован
@@ -79,12 +81,13 @@ async def generate_code(
     summary="Telegram bot webhook (secret in URL)",
     include_in_schema=False,
 )
+@limiter.limit("200/minute")
 async def telegram_webhook_with_secret(
     request: Request,
     webhook_secret: str = Path(...),
     x_telegram_bot_api_secret_token: str | None = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
     db: AsyncSession = Depends(get_db_session),
-    redis=Depends(get_redis),
+    redis: Redis = Depends(get_redis),
 ) -> JSONResponse:
     """Принимает обновления от Telegram Bot API. Secret в URL.
 
@@ -113,11 +116,12 @@ async def telegram_webhook_with_secret(
     summary="Telegram bot webhook (legacy env-based)",
     include_in_schema=False,
 )
+@limiter.limit("200/minute")
 async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str | None = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
     db: AsyncSession = Depends(get_db_session),
-    redis=Depends(get_redis),
+    redis: Redis = Depends(get_redis),
 ) -> JSONResponse:
     """Принимает обновления от Telegram Bot API. Обратная совместимость с env.
 
@@ -135,6 +139,9 @@ async def telegram_webhook(
         ):
             return JSONResponse(status_code=403, content={"ok": False})
     elif x_telegram_bot_api_secret_token:
+        return JSONResponse(status_code=403, content={"ok": False})
+    elif settings.TELEGRAM_BOT_TOKEN.strip() and not settings.DEBUG:
+        # AppSec: never accept unsigned webhook traffic in production when a bot token is set.
         return JSONResponse(status_code=403, content={"ok": False})
 
     if not settings.TELEGRAM_BOT_TOKEN or not settings.TELEGRAM_CHANNEL_ID:

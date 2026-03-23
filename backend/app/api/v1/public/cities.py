@@ -1,5 +1,7 @@
 """Public city endpoints."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,12 +15,12 @@ from app.services.city_public_service import CityPublicService
 router = APIRouter()
 
 
-@router.get("/cities", response_model=dict, summary="Список городов")
+@router.get("/cities", response_model=dict[str, Any], summary="Список городов")
 async def list_cities(
     with_doctors: bool = Query(False, description="Если true — только города с врачами, с подсчётом"),
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-) -> dict:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     """Возвращает список городов. С `with_doctors=true` дополнительно
     считает количество активных врачей в каждом городе."""
     svc = CityPublicService(db, redis)
@@ -34,7 +36,7 @@ async def list_cities(
 async def get_city(
     slug: str,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> CityWithDoctorsResponse:
     """Информация о городе по slug (включая количество врачей).
 

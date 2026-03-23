@@ -2,6 +2,7 @@
 doctor_documents, doctor_profile_changes, moderation_history, audit_log."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -185,7 +186,7 @@ class DoctorProfileChange(Base, UUIDMixin):
     doctor_profile_id: Mapped[UUID] = mapped_column(
         ForeignKey("doctor_profiles.id", ondelete="CASCADE"), nullable=False
     )
-    changes: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    changes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     changed_fields: Mapped[list[str]] = mapped_column(
         ARRAY(String), nullable=False
     )
@@ -239,8 +240,8 @@ class AuditLog(Base, UUIDMixin):
     user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
-    old_values: Mapped[dict | None] = mapped_column(JSONB)
-    new_values: Mapped[dict | None] = mapped_column(JSONB)
+    old_values: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    new_values: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     ip_address: Mapped[str | None] = mapped_column(INET)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default="now()", nullable=False

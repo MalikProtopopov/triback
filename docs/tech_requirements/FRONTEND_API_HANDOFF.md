@@ -16,14 +16,14 @@
 | Auth (регистрация, логин, refresh, logout, сброс/смена пароля, смена email) | **Готов** | RS256 JWT, Argon2id |
 | Онбординг (выбор роли, анкета, документы, submit) | **Готов** | |
 | Профиль врача (личный, публичный, модерация правок) | **Готов** | |
-| Подписки + Платежи + YooKassa webhook | **Готов** | Фискализация 54-ФЗ |
+| Подписки + Платежи + Moneta webhook (ЮKassa — опционально) | **Готов** | Основной провайдер: Moneta; 54-ФЗ |
 | Публичный API (врачи, города, мероприятия, статьи, документы) | **Готов** | |
 | Регистрация на мероприятия (3 сценария + верификация email) | **Готов** | Новый флоу! |
 | Админ: врачи (CRUD, модерация, импорт Excel) | **Готов** | |
 | Админ: мероприятия (CRUD, тарифы, галереи, записи) | **Готов** | |
 | Админ: контент (статьи, темы, документы организации) | **Готов** | Новый: reorder документов |
 | Админ: контентные блоки (CRUD + reorder) | **Готов** | Новый модуль! |
-| Админ: платежи (список, ручной платёж, возврат) | **Готов** | Новый: refund через YooKassa |
+| Админ: платежи (список, ручной платёж, возврат) | **Готов** | Refund через API провайдера (Moneta / при yookassa — ЮKassa) |
 | Админ: настройки (site_settings, города, планы) | **Готов** | |
 | Админ: SEO-страницы | **Готов** | |
 | Админ: Dashboard | **Готов** | |
@@ -148,10 +148,10 @@ Frontend                              Backend
    │  { tariff_id, idempotency_key }     │
    │ ──────────────────────────────────> │
    │                                     │  Создаёт регистрацию + платёж
-   │                                     │  Вызывает YooKassa
+   │                                     │  Провайдер: Moneta (или ЮKassa при PAYMENT_PROVIDER=yookassa)
    │  201 {                              │
    │    registration_id: "...",          │
-   │    payment_url: "https://yookassa.ru/...",
+   │    payment_url: "https://payanyway.ru/assistant.htm?...",
    │    applied_price: 10000.0,          │
    │    is_member_price: false,          │
    │    action: null                     │
@@ -491,9 +491,11 @@ api.interceptors.response.use(
 
 Все файлы загружаются как `multipart/form-data`. Изображения из API приходят как presigned S3 URL (временные ссылки).
 
-### 9.6 Тестовая оплата (YooKassa)
+### 9.6 Тестовая оплата
 
-На тестовом сервере YooKassa работает в sandbox-режиме. Карта для теста: `1111 1111 1111 1026`, любой CVC, любая дата.
+**Moneta (основной сценарий):** тестовый режим в ЛК Moneta + `MONETA_DEMO_MODE=true` и demo-URL (см. `docs/MONETA_SETUP_GUIDE.md`).
+
+**ЮKassa** (только если `PAYMENT_PROVIDER=yookassa`): sandbox, тестовая карта `1111 1111 1111 1026`, любой CVC, любая дата.
 
 ---
 
@@ -544,7 +546,7 @@ Nginx для фронтенда настраивается отдельно на
 
 ### 12.4 Admin Payment Refund
 
-`POST /api/v1/admin/payments/{payment_id}/refund` — возврат платежа через YooKassa.
+`POST /api/v1/admin/payments/{payment_id}/refund` — возврат через API провайдера (Moneta или ЮKassa в зависимости от `PAYMENT_PROVIDER`).
 
 ### 12.5 Voting Session Details
 

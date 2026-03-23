@@ -9,7 +9,7 @@ from app.tasks import broker
 logger = structlog.get_logger(__name__)
 
 
-@broker.task(retry_on_error=True, max_retries=3)  # type: ignore[misc]
+@broker.task(retry_on_error=True, max_retries=3)
 async def generate_member_certificate_task(doctor_profile_id: str, year: int) -> str:
     """Generate (or regenerate) a membership certificate PDF in the background.
 

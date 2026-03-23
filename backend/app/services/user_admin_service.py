@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +15,10 @@ from app.core.pagination import PaginatedResponse
 from app.core.security import hash_password
 from app.models.users import Role, User, UserRoleAssignment
 from app.schemas.users_admin import (
+    _ROLE_DISPLAY,
     AdminUserCreatedResponse,
     AdminUserDetailResponse,
     AdminUserListItem,
-    _ROLE_DISPLAY,
 )
 
 logger = structlog.get_logger(__name__)
@@ -37,18 +37,18 @@ class UserAdminService:
         offset: int = 0,
         role: str | None = None,
         search: str | None = None,
-    ) -> PaginatedResponse:
-        staff_subq = (
+    ) -> PaginatedResponse[AdminUserListItem]:
+        staff_select = (
             select(UserRoleAssignment.user_id)
             .join(Role, UserRoleAssignment.role_id == Role.id)
             .where(Role.name.in_(list(_STAFF_ROLES)))
         )
         if role and role in _STAFF_ROLES:
-            staff_subq = staff_subq.where(Role.name == role)
-        staff_subq = staff_subq.subquery()
+            staff_select = staff_select.where(Role.name == role)
+        staff_sq = staff_select.subquery()
 
-        base = select(User).where(User.id.in_(select(staff_subq)))
-        count_q = select(func.count(User.id)).where(User.id.in_(select(staff_subq)))
+        base = select(User).where(User.id.in_(select(staff_sq.c.user_id)))
+        count_q = select(func.count(User.id)).where(User.id.in_(select(staff_sq.c.user_id)))
 
         if search and len(search) >= 2:
             pattern = f"%{search}%"
@@ -182,7 +182,7 @@ class UserAdminService:
                 raise NotFoundError(f"Role '{new_role}' not found in database")
 
             await self.db.execute(
-                UserRoleAssignment.__table__.delete().where(
+                delete(UserRoleAssignment).where(
                     UserRoleAssignment.user_id == user_id,
                     UserRoleAssignment.role_id == current[1],
                 )

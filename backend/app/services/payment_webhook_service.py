@@ -9,14 +9,17 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.enums import (
     DoctorStatus,
     EventRegistrationStatus,
     PaymentStatus,
     ProductType,
+    ReceiptStatus,
     SubscriptionStatus,
 )
 from app.core.exceptions import ForbiddenError
+from app.core.logging_privacy import yookassa_webhook_body_summary
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment, Plan, Subscription
 from app.services.payment_utils import is_ip_allowed
@@ -32,7 +35,41 @@ class PaymentWebhookService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
+    async def _yookassa_api_allows_succeeded(
+        self, external_id: str, payment: Payment
+    ) -> bool:
+        """Confirm ``payment.succeeded`` via YooKassa API when credentials exist."""
+        if str(payment.payment_provider) != "yookassa":
+            return True
+        if not settings.YOOKASSA_WEBHOOK_VERIFY_WITH_API:
+            return True
+        if not (settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY):
+            logger.warning("yookassa_api_verify_skipped_no_credentials")
+            return True
+        from app.services.payment_providers.yookassa_client import YooKassaPaymentProvider
+
+        try:
+            yk = YooKassaPaymentProvider()
+            data = await yk.get_payment(external_id)
+        except Exception:
+            logger.exception(
+                "yookassa_api_verify_request_failed",
+                external_id=external_id[:48],
+            )
+            raise
+        if data.get("status") != "succeeded":
+            logger.warning(
+                "yookassa_api_status_mismatch",
+                external_id=external_id[:48],
+                api_status=str(data.get("status", ""))[:32],
+            )
+            return False
+        return True
+
     async def handle_webhook(self, body: dict[str, Any], client_ip: str) -> None:
+        # Trust model: YooKassa does not provide per-merchant HMAC secrets.
+        # Authentication relies solely on IP allowlist (YOOKASSA_IP_WHITELIST).
+        # See also: https://yookassa.ru/developers/using-api/webhooks#security
         if not is_ip_allowed(client_ip):
             raise ForbiddenError("IP not in YooKassa whitelist")
 
@@ -41,7 +78,10 @@ class PaymentWebhookService:
         external_id = obj.get("id")
 
         if not external_id:
-            logger.warning("webhook_missing_external_id", body=body)
+            logger.warning(
+                "webhook_missing_external_id",
+                body_summary=yookassa_webhook_body_summary(body),
+            )
             return
 
         result = await self.db.execute(
@@ -66,7 +106,10 @@ class PaymentWebhookService:
             logger.warning("webhook_payment_not_found", external_id=external_id)
             return
 
+        # См. app.services.payment_webhook_routing.YOOKASSA_WEBHOOK_EVENTS_HANDLED
         if event == "payment.succeeded":
+            if not await self._yookassa_api_allows_succeeded(str(external_id), payment):
+                return
             await self._handle_payment_succeeded(payment, obj)
         elif event == "payment.canceled":
             await self._handle_payment_canceled(payment)
@@ -78,13 +121,34 @@ class PaymentWebhookService:
     async def _handle_payment_succeeded(
         self, payment: Payment, obj: dict[str, Any]
     ) -> None:
+        receipt_obj = obj.get("receipt_registration") or obj.get("receipt")
+        await self._apply_payment_succeeded(
+            payment, receipt_obj=receipt_obj, send_user_telegram=True
+        )
+
+    async def _apply_payment_succeeded(
+        self,
+        payment: Payment,
+        *,
+        receipt_obj: dict[str, Any] | None = None,
+        send_user_telegram: bool = True,
+    ) -> None:
+        """Unified success handler for both YooKassa and Moneta.
+
+        Args:
+            payment: the Payment row, already locked with FOR UPDATE.
+            receipt_obj: optional provider receipt dict (YooKassa only).
+            send_user_telegram: send ``notify_user_payment_succeeded`` Telegram
+                notification (YooKassa path); Moneta omits this since it sends
+                a receipt notification separately via the receipt webhook.
+        """
         if payment.status == PaymentStatus.SUCCEEDED:
             return
 
         from app.models.subscriptions import Receipt
 
         now = datetime.now(UTC)
-        payment.status = PaymentStatus.SUCCEEDED  # type: ignore[assignment]
+        payment.status = PaymentStatus.SUCCEEDED
         payment.paid_at = now
 
         if payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
@@ -92,19 +156,18 @@ class PaymentWebhookService:
         elif payment.product_type == ProductType.EVENT:
             await self._confirm_event_registration(payment)
 
-        receipt_reg = obj.get("receipt_registration") or obj.get("receipt")
-        if receipt_reg:
+        if receipt_obj:
             receipt = Receipt(
                 payment_id=payment.id,
                 receipt_type="payment",
-                provider_receipt_id=receipt_reg.get("id") or receipt_reg.get("receipt_id"),
-                receipt_url=receipt_reg.get("receipt_url"),
-                fiscal_number=receipt_reg.get("fiscal_provider_id"),
-                fiscal_document=receipt_reg.get("fiscal_document_number"),
-                fiscal_sign=receipt_reg.get("fiscal_sign"),
-                receipt_data=receipt_reg,
+                provider_receipt_id=receipt_obj.get("id") or receipt_obj.get("receipt_id"),
+                receipt_url=receipt_obj.get("receipt_url"),
+                fiscal_number=receipt_obj.get("fiscal_provider_id"),
+                fiscal_document=receipt_obj.get("fiscal_document_number"),
+                fiscal_sign=receipt_obj.get("fiscal_sign"),
+                receipt_data=receipt_obj,
                 amount=payment.amount,
-                status=PaymentStatus.SUCCEEDED,
+                status=ReceiptStatus.SUCCEEDED,
             )
             self.db.add(receipt)
 
@@ -119,25 +182,25 @@ class PaymentWebhookService:
             select(User.email).where(User.id == payment.user_id)
         )
         email = email_result.scalar_one_or_none()
+        receipt_url = receipt_obj.get("receipt_url") if receipt_obj else None
         if email:
-            receipt_url = receipt_reg.get("receipt_url") if receipt_reg else None
             if payment.product_type == ProductType.EVENT:
                 await self._send_event_email(payment, email, receipt_url)
             else:
                 await send_payment_succeeded_notification.kiq(
                     email, float(payment.amount), payment.product_type, receipt_url
                 )
-            from app.tasks.telegram_tasks import (
-                notify_admin_payment_received,
-                notify_user_payment_succeeded,
-            )
+            from app.tasks.telegram_tasks import notify_admin_payment_received
 
             await notify_admin_payment_received.kiq(
                 email, float(payment.amount), payment.product_type
             )
-            await notify_user_payment_succeeded.kiq(
-                str(payment.user_id), float(payment.amount), payment.product_type
-            )
+            if send_user_telegram:
+                from app.tasks.telegram_tasks import notify_user_payment_succeeded
+
+                await notify_user_payment_succeeded.kiq(
+                    str(payment.user_id), float(payment.amount), payment.product_type
+                )
 
     async def _activate_subscription(self, payment: Payment, now: datetime) -> None:
         if not payment.subscription_id:
@@ -151,7 +214,7 @@ class PaymentWebhookService:
         duration_months = plan.duration_months if plan else 12
 
         if sub.status != SubscriptionStatus.ACTIVE:
-            sub.status = SubscriptionStatus.ACTIVE  # type: ignore[assignment]
+            sub.status = SubscriptionStatus.ACTIVE
 
         from dateutil.relativedelta import relativedelta
 
@@ -168,7 +231,7 @@ class PaymentWebhookService:
         )
         dp = dp_result.scalar_one_or_none()
         if dp and dp.status == DoctorStatus.APPROVED:
-            dp.status = DoctorStatus.ACTIVE  # type: ignore[assignment]
+            dp.status = DoctorStatus.ACTIVE
 
     async def _confirm_event_registration(self, payment: Payment) -> None:
         if not payment.event_registration_id:
@@ -177,12 +240,12 @@ class PaymentWebhookService:
 
         reg = await self.db.get(EventRegistration, payment.event_registration_id)
         if reg and reg.status != EventRegistrationStatus.CONFIRMED:
-            reg.status = EventRegistrationStatus.CONFIRMED  # type: ignore[assignment]
+            reg.status = EventRegistrationStatus.CONFIRMED
 
     async def _handle_payment_canceled(self, payment: Payment) -> None:
         if payment.status in (PaymentStatus.SUCCEEDED, PaymentStatus.FAILED, PaymentStatus.EXPIRED):
             return
-        payment.status = PaymentStatus.FAILED  # type: ignore[assignment]
+        payment.status = PaymentStatus.FAILED
 
         if payment.product_type == ProductType.EVENT and payment.event_registration_id:
             await self._cancel_event_registration(payment)
@@ -208,7 +271,7 @@ class PaymentWebhookService:
         if not reg:
             return
         if reg.status != EventRegistrationStatus.CANCELLED:
-            reg.status = EventRegistrationStatus.CANCELLED  # type: ignore[assignment]
+            reg.status = EventRegistrationStatus.CANCELLED
             tariff = await self.db.get(EventTariff, reg.event_tariff_id)
             if tariff and tariff.seats_taken > 0:
                 tariff.seats_taken -= 1
@@ -216,7 +279,7 @@ class PaymentWebhookService:
     async def _handle_refund_succeeded(self, payment: Payment) -> None:
         if payment.status == PaymentStatus.REFUNDED:
             return
-        payment.status = PaymentStatus.REFUNDED  # type: ignore[assignment]
+        payment.status = PaymentStatus.REFUNDED
 
         if payment.product_type == ProductType.EVENT and payment.event_registration_id:
             await self._cancel_event_registration(payment)
@@ -291,39 +354,11 @@ class PaymentWebhookService:
             )
 
     async def handle_moneta_payment_succeeded(self, payment: Payment) -> None:
-        """Process a successful Moneta payment — same business logic as YooKassa."""
-        if payment.status == PaymentStatus.SUCCEEDED:
-            return
+        """Process a successful Moneta payment — delegates to the unified success handler.
 
-        now = datetime.now(UTC)
-        payment.status = PaymentStatus.SUCCEEDED  # type: ignore[assignment]
-        payment.paid_at = now
-
-        if payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
-            await self._activate_subscription(payment, now)
-        elif payment.product_type == ProductType.EVENT:
-            await self._confirm_event_registration(payment)
-
-        await self.db.commit()
-
-        if payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
-            await self._trigger_certificate_generation(payment.user_id, now.year)
-
-        from app.models.users import User
-
-        email_result = await self.db.execute(
-            select(User.email).where(User.id == payment.user_id)
-        )
-        email = email_result.scalar_one_or_none()
-        if email:
-            if payment.product_type == ProductType.EVENT:
-                await self._send_event_email(payment, email, None)
-            else:
-                await send_payment_succeeded_notification.kiq(
-                    email, float(payment.amount), payment.product_type, None
-                )
-            from app.tasks.telegram_tasks import notify_admin_payment_received
-
-            await notify_admin_payment_received.kiq(
-                email, float(payment.amount), payment.product_type
-            )
+        Moneta does not provide a receipt object at this stage (receipt URL arrives
+        via the separate ``/webhooks/moneta/receipt`` callback), so ``receipt_obj``
+        is omitted.  User Telegram notification is also omitted because Moneta sends
+        its own receipt notification through the receipt webhook flow.
+        """
+        await self._apply_payment_succeeded(payment, receipt_obj=None, send_user_telegram=False)

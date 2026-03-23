@@ -1,8 +1,9 @@
 """Public event endpoints."""
 
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from redis.asyncio import Redis
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from app.core.enums import EventRegistrationStatus, SubscriptionStatus
 from app.core.exceptions import NotFoundError
 from app.core.openapi import error_responses
 from app.core.pagination import PaginatedResponse
+from app.core.rate_limit import limiter
 from app.core.redis import get_redis
 from app.models.events import (
     Event,
@@ -49,7 +51,7 @@ async def list_events(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     period: str = Query("upcoming", description="upcoming | past | all"),
-) -> dict:
+) -> dict[str, Any]:
     """Пагинированный список мероприятий с фильтром по периоду."""
     svc = EventPublicService(db)
     return await svc.list_events(limit=limit, offset=offset, period=period)
@@ -80,11 +82,13 @@ async def get_event(
     summary="Регистрация на мероприятие",
     responses=error_responses(404, 409, 422, 429),
 )
+@limiter.limit("30/minute")
 async def register_for_event(
+    request: Request,
     event_id: UUID,
     body: RegisterForEventRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
     user_id: UUID | None = Depends(get_optional_user_id),
 ) -> RegisterForEventResponse:
     """Регистрирует пользователя на мероприятие. Три сценария:
@@ -97,7 +101,7 @@ async def register_for_event(
     - **409** — уже зарегистрирован, нет мест, мероприятие закрыто
     - **429** — слишком много отправок кода (макс. 3 за 10 мин)
     """
-    from app.services.event_registration_service import EventRegistrationService
+    from app.services.event_registration import EventRegistrationService
 
     svc = EventRegistrationService(db, redis)
     return await svc.register(event_id, user_id, body)
@@ -110,11 +114,13 @@ async def register_for_event(
     summary="Подтверждение гостевой регистрации",
     responses=error_responses(404, 409, 422, 429),
 )
+@limiter.limit("30/minute")
 async def confirm_guest_registration(
+    request: Request,
     event_id: UUID,
     body: ConfirmGuestRegistrationRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> RegisterForEventResponse:
     """Подтверждает email гостя 6-значным кодом и создаёт регистрацию + платёж.
     Возвращает `payment_url` для оплаты.
@@ -123,7 +129,7 @@ async def confirm_guest_registration(
     - **409** — неверный код (макс. 5 попыток), нет мест
     - **429** — превышен лимит попыток ввода кода
     """
-    from app.services.event_registration_service import EventRegistrationService
+    from app.services.event_registration import EventRegistrationService
 
     svc = EventRegistrationService(db, redis)
     return await svc.confirm_guest_registration(event_id, body)
@@ -141,7 +147,7 @@ async def list_event_galleries(
     event_id: UUID,
     db: AsyncSession = Depends(get_db_session),
     user_id: UUID | None = Depends(get_optional_user_id),
-) -> dict:
+) -> dict[str, Any]:
     """Список галерей с фотографиями. Галереи с `access_level=members_only`
     видны только участникам (с подпиской или подтверждённой регистрацией).
 
@@ -217,7 +223,7 @@ async def list_event_recordings(
     event_id: UUID,
     db: AsyncSession = Depends(get_db_session),
     user_id: UUID | None = Depends(get_optional_user_id),
-) -> dict:
+) -> dict[str, Any]:
     """Список видеозаписей мероприятия. Записи с `access_level` members_only/participants_only
     видны только при наличии активной подписки или подтверждённой регистрации.
 

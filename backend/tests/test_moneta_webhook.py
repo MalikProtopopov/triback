@@ -8,8 +8,11 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.enums import PaymentStatus
 from app.models.subscriptions import Payment, Plan, Subscription
 from app.services.payment_providers.moneta_client import _md5
+
+RECEIPT_TEST_SECRET = "test-receipt-webhook-secret"
 
 
 def _make_signature(mnt_id: str, txn_id: str, op_id: str, amount: str, secret: str) -> str:
@@ -261,15 +264,23 @@ async def test_moneta_receipt_webhook(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "app.core.config.settings.MONETA_RECEIPT_WEBHOOK_SECRET",
+        RECEIPT_TEST_SECRET,
+    )
     pending_payment.moneta_operation_id = "receipt-op-1"
-    pending_payment.status = "succeeded"  # type: ignore[assignment]
+    pending_payment.status = PaymentStatus.SUCCEEDED
     await db_session.flush()
 
     body = {
         "operation": "receipt-op-1",
         "receipt": "https://receipt.example.com/12345",
     }
-    resp = await client.post("/api/v1/webhooks/moneta/receipt", json=body)
+    resp = await client.post(
+        "/api/v1/webhooks/moneta/receipt",
+        json=body,
+        headers={"X-Moneta-Receipt-Secret": RECEIPT_TEST_SECRET},
+    )
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
@@ -277,14 +288,85 @@ async def test_moneta_receipt_webhook(
 @pytest.mark.anyio
 async def test_moneta_receipt_webhook_unknown_operation(
     client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "app.core.config.settings.MONETA_RECEIPT_WEBHOOK_SECRET",
+        RECEIPT_TEST_SECRET,
+    )
     body = {
         "operation": "unknown-op",
         "receipt": "https://receipt.example.com/99",
     }
-    resp = await client.post("/api/v1/webhooks/moneta/receipt", json=body)
+    resp = await client.post(
+        "/api/v1/webhooks/moneta/receipt",
+        json=body,
+        headers={"X-Moneta-Receipt-Secret": RECEIPT_TEST_SECRET},
+    )
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+@pytest.mark.anyio
+async def test_moneta_receipt_webhook_forbidden_without_auth(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False)
+    monkeypatch.setattr("app.core.config.settings.MONETA_RECEIPT_WEBHOOK_SECRET", "")
+    monkeypatch.setattr("app.core.config.settings.MONETA_RECEIPT_IP_ALLOWLIST", "")
+    monkeypatch.setattr("app.services.payment_utils._MONETA_RECEIPT_NETWORKS", [])
+
+    body = {"operation": "any", "receipt": "https://receipt.example.com/x"}
+    resp = await client.post("/api/v1/webhooks/moneta/receipt", json=body)
+    assert resp.status_code == 403
+    data = resp.json()
+    assert data["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.anyio
+async def test_moneta_invalid_signature_releases_dedup_key(
+    client: AsyncClient,
+    pending_payment: Payment,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Invalid Moneta signature must not permanently consume the Redis dedup slot.
+
+    Regression test for the critical defect where ``SET NX`` ran *before*
+    ``verify_webhook``, and a failed signature verification did not clean up
+    the dedup key, blocking all subsequent legitimate retries for the same
+    ``MNT_OPERATION_ID``.
+    """
+    monkeypatch.setattr("app.core.config.settings.MONETA_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr("app.core.config.settings.MONETA_MNT_ID", "mnt-1")
+
+    op_id = f"op-dedup-{uuid4().hex[:8]}"
+    base_params = {
+        "MNT_ID": "mnt-1",
+        "MNT_TRANSACTION_ID": str(pending_payment.id),
+        "MNT_OPERATION_ID": op_id,
+        "MNT_AMOUNT": "15000.00",
+        "MNT_CURRENCY_CODE": "RUB",
+        "MNT_SUBSCRIBER_ID": "",
+        "MNT_TEST_MODE": "",
+    }
+
+    # First call: bad signature → FAIL; dedup key must be released.
+    resp_bad = await client.get(
+        "/api/v1/webhooks/moneta",
+        params={**base_params, "MNT_SIGNATURE": "bad-sig"},
+    )
+    assert resp_bad.status_code == 200
+    assert resp_bad.text == "FAIL"
+
+    # Second call: same op_id, now valid signature → must be processed (not short-circuited by dedup).
+    good_sig = _make_signature("mnt-1", str(pending_payment.id), op_id, "15000.00", "test-secret")
+    resp_good = await client.get(
+        "/api/v1/webhooks/moneta",
+        params={**base_params, "MNT_SIGNATURE": good_sig},
+    )
+    assert resp_good.status_code == 200
+    assert resp_good.text == "SUCCESS"
 
 
 @pytest.mark.anyio

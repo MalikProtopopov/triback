@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.certificate_settings import CertificateSettings
+from app.schemas.certificate_settings import CertificateSettingsResponse
 from app.services import file_service
 
 logger = structlog.get_logger(__name__)
@@ -33,7 +36,7 @@ class CertificateSettingsService:
             await self.db.refresh(settings)
         return settings
 
-    async def update_settings(self, data: dict) -> CertificateSettings:
+    async def update_settings(self, data: dict[str, Any]) -> CertificateSettings:
         settings = await self.get_settings()
         for key, value in data.items():
             if value is not None and hasattr(settings, key):
@@ -64,19 +67,19 @@ class CertificateSettingsService:
         logger.info("certificate_asset_uploaded", field=field, s3_key=s3_key)
         return settings
 
-    def to_response(self, settings: CertificateSettings) -> dict:
-        return {
-            "id": settings.id,
-            "president_full_name": settings.president_full_name,
-            "president_title": settings.president_title,
-            "organization_full_name": settings.organization_full_name,
-            "organization_short_name": settings.organization_short_name,
-            "certificate_member_text": settings.certificate_member_text,
-            "logo_url": file_service.build_media_url(settings.logo_s3_key),
-            "stamp_url": file_service.build_media_url(settings.stamp_s3_key),
-            "signature_url": file_service.build_media_url(settings.signature_s3_key),
-            "background_url": file_service.build_media_url(settings.background_s3_key),
-            "certificate_number_prefix": settings.certificate_number_prefix,
-            "validity_text_template": settings.validity_text_template,
-            "updated_at": settings.updated_at,
-        }
+    def to_response(self, settings: CertificateSettings) -> CertificateSettingsResponse:
+        return CertificateSettingsResponse(
+            id=settings.id,
+            president_full_name=settings.president_full_name,
+            president_title=settings.president_title,
+            organization_full_name=settings.organization_full_name,
+            organization_short_name=settings.organization_short_name,
+            certificate_member_text=settings.certificate_member_text,
+            logo_url=file_service.build_media_url(settings.logo_s3_key),
+            stamp_url=file_service.build_media_url(settings.stamp_s3_key),
+            signature_url=file_service.build_media_url(settings.signature_s3_key),
+            background_url=file_service.build_media_url(settings.background_s3_key),
+            certificate_number_prefix=settings.certificate_number_prefix,
+            validity_text_template=settings.validity_text_template,
+            updated_at=settings.updated_at,
+        )

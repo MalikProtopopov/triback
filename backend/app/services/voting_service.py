@@ -39,9 +39,15 @@ def _has_active_subscription() -> Any:
     )
 
 
-_VALID_STATUS_TRANSITIONS = {
-    VotingSessionStatus.DRAFT: {VotingSessionStatus.ACTIVE, VotingSessionStatus.CANCELLED},
-    VotingSessionStatus.ACTIVE: {VotingSessionStatus.CLOSED, VotingSessionStatus.CANCELLED},
+_VALID_STATUS_TRANSITIONS: dict[
+    VotingSessionStatus, frozenset[VotingSessionStatus]
+] = {
+    VotingSessionStatus.DRAFT: frozenset(
+        {VotingSessionStatus.ACTIVE, VotingSessionStatus.CANCELLED}
+    ),
+    VotingSessionStatus.ACTIVE: frozenset(
+        {VotingSessionStatus.CLOSED, VotingSessionStatus.CANCELLED}
+    ),
 }
 
 
@@ -74,7 +80,7 @@ class VotingService:
 
     # ── Public ────────────────────────────────────────────────────
 
-    async def get_active_session(self, user_id: str) -> dict | None:
+    async def get_active_session(self, user_id: str) -> dict[str, Any] | None:
         """Return the currently active voting session with candidates and has_voted flag."""
         now = datetime.now(UTC)
 
@@ -102,7 +108,7 @@ class VotingService:
             )
         ).scalar_one_or_none() is not None
 
-        candidates: list[dict] = []
+        candidates: list[dict[str, Any]] = []
         for cand in sorted(session.candidates, key=lambda c: c.sort_order):
             profile = await self.db.get(DoctorProfile, cand.doctor_profile_id)
             full_name = ""
@@ -168,7 +174,7 @@ class VotingService:
 
     # ── Admin CRUD ────────────────────────────────────────────────
 
-    async def get_session(self, session_id: UUID) -> dict:
+    async def get_session(self, session_id: UUID) -> dict[str, Any]:
         result = await self.db.execute(
             select(VotingSession)
             .options(selectinload(VotingSession.candidates))
@@ -178,7 +184,7 @@ class VotingService:
         if not session:
             raise NotFoundError("Voting session not found")
 
-        candidates: list[dict] = []
+        candidates: list[dict[str, Any]] = []
         for cand in sorted(session.candidates, key=lambda c: c.sort_order):
             profile = await self.db.get(DoctorProfile, cand.doctor_profile_id)
             full_name = ""
@@ -211,7 +217,7 @@ class VotingService:
         limit: int = 20,
         offset: int = 0,
         status: str | None = None,
-    ) -> PaginatedResponse:
+    ) -> PaginatedResponse[dict[str, Any]]:
         q = select(VotingSession)
         count_q = select(func.count(VotingSession.id))
 
@@ -248,7 +254,7 @@ class VotingService:
         self,
         admin_id: str,
         data: dict[str, Any],
-    ) -> dict:
+    ) -> dict[str, Any]:
         session = VotingSession(
             title=data["title"],
             description=data.get("description"),
@@ -286,19 +292,26 @@ class VotingService:
             "candidates_count": len(data["candidates"]),
         }
 
-    async def update_session(self, session_id: UUID, data: dict[str, Any]) -> dict:
+    async def update_session(self, session_id: UUID, data: dict[str, Any]) -> dict[str, Any]:
         session = await self.db.get(VotingSession, session_id)
         if not session:
             raise NotFoundError("Voting session not found")
 
-        new_status = data.get("status")
-        if new_status:
-            allowed = _VALID_STATUS_TRANSITIONS.get(session.status, set())
+        new_status_raw = data.get("status")
+        if new_status_raw:
+            current = VotingSessionStatus(session.status)
+            allowed = _VALID_STATUS_TRANSITIONS.get(
+                current, frozenset[VotingSessionStatus]()
+            )
+            try:
+                new_status = VotingSessionStatus(str(new_status_raw))
+            except ValueError as e:
+                raise AppValidationError(f"Invalid status: {new_status_raw!r}") from e
             if new_status not in allowed:
                 raise AppValidationError(
-                    f"Cannot transition from '{session.status}' to '{new_status}'"
+                    f"Cannot transition from '{session.status}' to '{new_status_raw}'"
                 )
-            session.status = new_status  # type: ignore[assignment]
+            session.status = new_status.value
 
         if "title" in data and data["title"] is not None:
             session.title = data["title"]
@@ -324,7 +337,7 @@ class VotingService:
             "candidates_count": cands,
         }
 
-    async def get_results(self, session_id: UUID) -> dict:
+    async def get_results(self, session_id: UUID) -> dict[str, Any]:
         result = await self.db.execute(
             select(VotingSession)
             .options(selectinload(VotingSession.candidates))
@@ -349,7 +362,7 @@ class VotingService:
             )
         ).scalar() or 0
 
-        results: list[dict] = []
+        results: list[dict[str, Any]] = []
         for cand in session.candidates:
             cand_votes = (
                 await self.db.execute(

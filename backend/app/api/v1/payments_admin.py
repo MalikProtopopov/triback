@@ -38,7 +38,7 @@ ADMIN_ACCOUNTANT = require_role("admin", "accountant")
 async def list_payments(
     payload: dict[str, Any] = ADMIN_MANAGER_ACCOUNTANT,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status: str | None = Query(None, description="pending | succeeded | canceled"),
@@ -79,7 +79,7 @@ async def create_manual_payment(
     body: ManualPaymentRequest,
     payload: dict[str, Any] = ADMIN_ACCOUNTANT,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> ManualPaymentResponse:
     """Создаёт платёж вручную (наличные, перевод). Автоматически
     обновляет подписку/регистрацию.
@@ -104,8 +104,8 @@ async def cancel_payment(
     body: CancelPaymentRequest,
     payload: dict[str, Any] = ADMIN_ACCOUNTANT,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-) -> dict:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     """Отменяет pending-платёж. Связанная подписка или регистрация
     на мероприятие также отменяются. После отмены пользователь
     может создать новый платёж.
@@ -128,8 +128,8 @@ async def confirm_payment(
     payment_id: UUID,
     payload: dict[str, Any] = ADMIN_ACCOUNTANT,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-) -> dict:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     """Принудительно подтверждает pending-платёж и активирует подписку.
 
     Временный endpoint для тестирования, пока Moneta demo не завершает
@@ -169,8 +169,8 @@ async def refund_payment(
     body: RefundRequest,
     payload: dict[str, Any] = ADMIN_ACCOUNTANT,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-) -> dict:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     """Инициирует возврат платежа через YooKassa. Поддерживает
     частичный и полный возврат. Финальный статус придёт через webhook
     `refund.succeeded`.

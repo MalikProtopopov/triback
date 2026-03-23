@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
@@ -184,7 +184,7 @@ class MonetaPaymentProvider(PaymentProvider):
         try:
             parsed_amount = Decimal(mnt_amount) if mnt_amount else Decimal(0)
         except Exception:
-            raise ValueError(f"Invalid MNT_AMOUNT: {mnt_amount!r}")
+            raise ValueError(f"Invalid MNT_AMOUNT: {mnt_amount!r}") from None
 
         return WebhookData(
             event_type="payment.succeeded",
@@ -239,7 +239,7 @@ class MonetaPaymentProvider(PaymentProvider):
         url = f"{base}?MNT_ID={self._mnt_id}"
         url += f"&MNT_TRANSACTION_ID={transaction_id}"
         url += f"&MNT_AMOUNT={amount}"
-        url += f"&MNT_CURRENCY_CODE=RUB"
+        url += "&MNT_CURRENCY_CODE=RUB"
         url += f"&MNT_TEST_MODE={test_mode}"
 
         if self._webhook_secret:
@@ -314,7 +314,7 @@ class MonetaPaymentProvider(PaymentProvider):
                         code = fault.get("detail", {}).get("faultDetail", "unknown")
                         msg = fault.get("faultstring", "Unknown Moneta error")
                         raise ValueError(f"Moneta API error [{code}]: {msg}")
-                    return body
+                    return cast(dict[str, Any], body)
             except httpx.HTTPError as exc:
                 logger.warning(
                     "moneta_api_request_error",

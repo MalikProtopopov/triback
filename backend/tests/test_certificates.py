@@ -141,7 +141,7 @@ class TestClientCertificates:
         assert len(data) == 1
         assert data[0]["certificate_type"] == "event"
 
-    @patch("app.services.certificate_service.file_service")
+    @patch("app.services.certificates.certificate_storage.file_service")
     async def test_download_active_certificate(
         self, mock_fs, client: AsyncClient, db_session: AsyncSession, doctor_user
     ):
@@ -171,7 +171,7 @@ class TestClientCertificates:
         assert resp.headers["content-type"] == "application/pdf"
         assert b"%PDF-" in resp.content
 
-    @patch("app.services.certificate_service.file_service")
+    @patch("app.services.certificates.certificate_storage.file_service")
     async def test_download_inactive_certificate_returns_403(
         self, mock_fs, client: AsyncClient, db_session: AsyncSession, doctor_user
     ):
@@ -220,7 +220,7 @@ class TestPublicVerification:
         profile = await create_doctor_profile(db_session, user=doctor_user, status="active")
         plan = await create_plan(db_session)
         await create_subscription(db_session, user=doctor_user, plan=plan, status="active")
-        cert = await _create_certificate(
+        await _create_certificate(
             db_session, user=doctor_user, profile=profile, cert_number="TRICH-2026-000001"
         )
 
@@ -514,6 +514,23 @@ class TestPDFGeneration:
         assert len(pdf_bytes) > 0
         assert pdf_bytes[:5] == b"%PDF-"
 
+    def test_certificate_qr_code_valid(self):
+        """Verify URL used on certificates encodes to a QR image (smoke)."""
+        import io
+
+        from qrcode.constants import ERROR_CORRECT_L
+        from qrcode.main import QRCode
+
+        url = "https://trichology.ru/certificates/verify/TRICH-2026-000001"
+        qr = QRCode(version=1, error_correction=ERROR_CORRECT_L)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        assert buf.tell() > 100
+        assert url.startswith("https://")
+
     def test_generate_member_pdf_with_images(self):
         import io
         from PIL import Image
@@ -587,7 +604,7 @@ class TestPDFGeneration:
 
 class TestCertificateService:
 
-    @patch("app.services.certificate_service.file_service")
+    @patch("app.services.certificates.certificate_storage.file_service")
     async def test_generate_membership_certificate(
         self, mock_fs, db_session: AsyncSession, doctor_user
     ):
@@ -617,7 +634,7 @@ class TestCertificateService:
         assert cert.year == 2026
         mock_s3_client.put_object.assert_called_once()
 
-    @patch("app.services.certificate_service.file_service")
+    @patch("app.services.certificates.certificate_storage.file_service")
     async def test_regenerate_existing_certificate(
         self, mock_fs, db_session: AsyncSession, doctor_user
     ):
@@ -659,7 +676,7 @@ class TestCertificateService:
         with pytest.raises(NotFoundError):
             await svc.generate_membership_certificate(uuid4(), 2026)
 
-    @patch("app.services.certificate_service.file_service")
+    @patch("app.services.certificates.certificate_storage.file_service")
     async def test_certificate_number_sequential(
         self, mock_fs, db_session: AsyncSession
     ):

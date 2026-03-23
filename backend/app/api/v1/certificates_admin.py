@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db_session
 from app.core.openapi import error_responses
 from app.core.security import require_role
@@ -39,7 +40,7 @@ ADMIN_MANAGER = require_role("admin", "manager")
 async def get_certificate_settings(
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> CertificateSettingsResponse:
     svc = CertificateSettingsService(db)
     settings = await svc.get_settings()
     return svc.to_response(settings)
@@ -55,7 +56,7 @@ async def update_certificate_settings(
     body: CertificateSettingsUpdateRequest,
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> CertificateSettingsResponse:
     svc = CertificateSettingsService(db)
     settings = await svc.update_settings(body.model_dump(exclude_none=True))
     return svc.to_response(settings)
@@ -71,7 +72,7 @@ async def upload_certificate_logo(
     file: UploadFile,
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> CertificateSettingsResponse:
     svc = CertificateSettingsService(db)
     settings = await svc.upload_asset("logo_s3_key", file)
     return svc.to_response(settings)
@@ -87,7 +88,7 @@ async def upload_certificate_stamp(
     file: UploadFile,
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> CertificateSettingsResponse:
     svc = CertificateSettingsService(db)
     settings = await svc.upload_asset("stamp_s3_key", file)
     return svc.to_response(settings)
@@ -103,7 +104,7 @@ async def upload_certificate_signature(
     file: UploadFile,
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> CertificateSettingsResponse:
     svc = CertificateSettingsService(db)
     settings = await svc.upload_asset("signature_s3_key", file)
     return svc.to_response(settings)
@@ -119,7 +120,7 @@ async def upload_certificate_background(
     file: UploadFile,
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> CertificateSettingsResponse:
     svc = CertificateSettingsService(db)
     settings = await svc.upload_asset("background_s3_key", file)
     return svc.to_response(settings)
@@ -137,7 +138,7 @@ async def list_doctor_certificates(
     doctor_id: UUID,
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     result = await db.execute(
         select(DoctorProfile).where(DoctorProfile.id == doctor_id)
     )
@@ -193,7 +194,7 @@ async def admin_download_certificate(
     session = file_service._get_s3_session()
     async with session.client(**file_service._s3_client_kwargs()) as s3:
         resp = await s3.get_object(
-            Bucket=file_service.settings.S3_BUCKET, Key=cert.file_url
+            Bucket=settings.S3_BUCKET, Key=cert.file_url
         )
         data: bytes = await resp["Body"].read()
 
@@ -217,7 +218,7 @@ async def regenerate_doctor_certificate(
     body: dict[str, Any],
     payload: dict[str, Any] = ADMIN_MANAGER,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     year = body.get("year", datetime.now(UTC).year)
 
     result = await db.execute(
@@ -252,7 +253,7 @@ async def update_certificate(
     body: dict[str, Any],
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     cert = await db.get(Certificate, certificate_id)
     if not cert:
         from app.core.exceptions import NotFoundError
@@ -282,7 +283,7 @@ async def update_certificate(
 async def regenerate_all_certificates(
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     year = datetime.now(UTC).year
     result = await db.execute(
         select(Certificate).where(

@@ -1,5 +1,8 @@
 """Auth router — registration, login, tokens, password/email management."""
 
+from typing import Any
+from uuid import UUID
+
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,20 +51,25 @@ def _get_refresh_cookie_key(request: Request) -> str:
 
 
 def _set_refresh_cookie(response: Response, token: str, key: str = REFRESH_COOKIE_KEY) -> None:
-    kwargs: dict = dict(
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=REFRESH_COOKIE_MAX_AGE,
-        path=REFRESH_COOKIE_PATH,
-    )
+    kwargs: dict[str, Any] = {
+        "httponly": True,
+        "secure": True,
+        "samesite": "lax",
+        "max_age": REFRESH_COOKIE_MAX_AGE,
+        "path": REFRESH_COOKIE_PATH,
+    }
     if settings.COOKIE_DOMAIN:
         kwargs["domain"] = settings.COOKIE_DOMAIN
     response.set_cookie(key=key, value=token, **kwargs)
 
 
 def _clear_refresh_cookie(response: Response, key: str = REFRESH_COOKIE_KEY) -> None:
-    kwargs: dict = dict(httponly=True, secure=True, samesite="lax", path=REFRESH_COOKIE_PATH)
+    kwargs: dict[str, Any] = {
+        "httponly": True,
+        "secure": True,
+        "samesite": "lax",
+        "path": REFRESH_COOKIE_PATH,
+    }
     if settings.COOKIE_DOMAIN:
         kwargs["domain"] = settings.COOKIE_DOMAIN
     response.delete_cookie(key=key, **kwargs)
@@ -71,20 +79,25 @@ def _set_access_token_cookie(response: Response, token: str) -> None:
     """Set access_token cookie so cross-origin API requests with credentials get auth.
     SameSite=None allows cookie to be sent from frontend on different subdomain.
     """
-    kwargs: dict = dict(
-        httponly=True,
-        secure=True,
-        samesite="none",  # Required for cross-origin requests (e.g. trichologia.mediann.dev → trihoback.mediann.dev)
-        path=ACCESS_TOKEN_COOKIE_PATH,
-        max_age=ACCESS_TOKEN_COOKIE_MAX_AGE,
-    )
+    kwargs: dict[str, Any] = {
+        "httponly": True,
+        "secure": True,
+        "samesite": settings.ACCESS_TOKEN_COOKIE_SAMESITE,
+        "path": ACCESS_TOKEN_COOKIE_PATH,
+        "max_age": ACCESS_TOKEN_COOKIE_MAX_AGE,
+    }
     if settings.COOKIE_DOMAIN:
         kwargs["domain"] = settings.COOKIE_DOMAIN
     response.set_cookie(key=ACCESS_TOKEN_COOKIE_KEY, value=token, **kwargs)
 
 
 def _clear_access_token_cookie(response: Response) -> None:
-    kwargs: dict = dict(httponly=True, secure=True, samesite="none", path=ACCESS_TOKEN_COOKIE_PATH)
+    kwargs: dict[str, Any] = {
+        "httponly": True,
+        "secure": True,
+        "samesite": settings.ACCESS_TOKEN_COOKIE_SAMESITE,
+        "path": ACCESS_TOKEN_COOKIE_PATH,
+    }
     if settings.COOKIE_DOMAIN:
         kwargs["domain"] = settings.COOKIE_DOMAIN
     response.delete_cookie(key=ACCESS_TOKEN_COOKIE_KEY, **kwargs)
@@ -102,7 +115,7 @@ async def register(
     request: Request,
     data: RegisterRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Создаёт аккаунт и отправляет письмо подтверждения.
 
@@ -118,12 +131,14 @@ async def register(
     "/verify-email",
     response_model=MessageResponse,
     summary="Подтверждение email",
-    responses=error_responses(404, 422),
+    responses=error_responses(404, 422, 429),
 )
+@limiter.limit("20/minute")
 async def verify_email(
+    request: Request,
     data: VerifyEmailRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Подтверждает email по одноразовому токену из письма.
 
@@ -145,7 +160,7 @@ async def resend_verification_email(
     request: Request,
     data: ResendVerificationRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Повторно отправляет письмо подтверждения email. Всегда 200 — не раскрывает
     статус верификации.
@@ -171,7 +186,7 @@ async def login(
     data: LoginRequest,
     response: Response,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> TokenResponse:
     """Аутентифицирует пользователя, возвращает access_token.
     Refresh token устанавливается в httpOnly cookie.
@@ -194,13 +209,14 @@ async def login(
     "/refresh",
     response_model=TokenResponse,
     summary="Обновление токена",
-    responses=error_responses(401),
+    responses=error_responses(401, 429),
 )
+@limiter.limit("30/minute")
 async def refresh(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
     refresh_token: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY),
     refresh_token_admin: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY_ADMIN),
 ) -> TokenResponse:
@@ -232,9 +248,9 @@ async def refresh(
     responses=error_responses(401),
 )
 async def get_me(
-    payload: dict = Depends(get_current_user),
+    payload: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> CurrentUserResponse:
     """Возвращает id, email, role, is_staff и sidebar_sections для текущего пользователя.
     Используется фронтендом для построения сайдбара по ролям.
@@ -254,7 +270,7 @@ async def get_me(
 async def logout(
     response: Response,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
     refresh_token: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY),
     refresh_token_admin: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY_ADMIN),
 ) -> MessageResponse:
@@ -270,6 +286,27 @@ async def logout(
 
 
 @router.post(
+    "/logout-all",
+    response_model=MessageResponse,
+    summary="Выйти на всех устройствах",
+    responses=error_responses(401),
+)
+async def logout_all(
+    response: Response,
+    user_id: UUID = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> MessageResponse:
+    """Отзывает все refresh-сессии пользователя. Текущий access JWT остаётся валидным до exp."""
+    svc = AuthService(db, redis)
+    await svc.logout_all_sessions(user_id)
+    _clear_refresh_cookie(response, key=REFRESH_COOKIE_KEY)
+    _clear_refresh_cookie(response, key=REFRESH_COOKIE_KEY_ADMIN)
+    _clear_access_token_cookie(response)
+    return MessageResponse(message="Все сессии завершены")
+
+
+@router.post(
     "/forgot-password",
     response_model=MessageResponse,
     summary="Запрос сброса пароля",
@@ -280,7 +317,7 @@ async def forgot_password(
     request: Request,
     data: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Отправляет письмо для сброса пароля. Всегда 200 — не раскрывает,
     зарегистрирован ли email.
@@ -296,12 +333,14 @@ async def forgot_password(
     "/reset-password",
     response_model=MessageResponse,
     summary="Сброс пароля по токену",
-    responses=error_responses(404, 422),
+    responses=error_responses(404, 422, 429),
 )
+@limiter.limit("20/minute")
 async def reset_password(
+    request: Request,
     data: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Устанавливает новый пароль, используя одноразовый токен из письма.
 
@@ -320,9 +359,9 @@ async def reset_password(
 )
 async def change_password(
     data: ChangePasswordRequest,
-    user_id=Depends(get_current_user_id),
+    user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Меняет пароль авторизованного пользователя.
 
@@ -341,9 +380,9 @@ async def change_password(
 )
 async def change_email(
     data: ChangeEmailRequest,
-    user_id=Depends(get_current_user_id),
+    user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Инициирует смену email. Отправляет письмо подтверждения на новый адрес.
 
@@ -364,7 +403,7 @@ async def change_email(
 async def confirm_email_change(
     data: ConfirmEmailChangeRequest,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> MessageResponse:
     """Подтверждает смену email по одноразовому токену.
 

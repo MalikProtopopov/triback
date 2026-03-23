@@ -1,6 +1,7 @@
 """Pydantic schemas for SEO page meta admin endpoints."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -17,7 +18,7 @@ class SeoPageCreate(BaseModel):
     og_type: str | None = Field(None, max_length=50)
     twitter_card: str | None = Field(None, max_length=50)
     canonical_url: str | None = Field(None, max_length=500)
-    custom_meta: dict | None = None
+    custom_meta: dict[str, Any] | None = None
 
 
 class SeoPageUpdate(BaseModel):
@@ -30,7 +31,7 @@ class SeoPageUpdate(BaseModel):
     og_type: str | None = Field(None, max_length=50)
     twitter_card: str | None = Field(None, max_length=50)
     canonical_url: str | None = Field(None, max_length=500)
-    custom_meta: dict | None = None
+    custom_meta: dict[str, Any] | None = None
 
 
 class SeoPageResponse(BaseModel):
@@ -45,7 +46,7 @@ class SeoPageResponse(BaseModel):
     og_type: str | None = None
     twitter_card: str | None = None
     canonical_url: str | None = None
-    custom_meta: dict | None = None
+    custom_meta: dict[str, Any] | None = None
     updated_at: datetime
 
 

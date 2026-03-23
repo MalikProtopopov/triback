@@ -1,5 +1,6 @@
 """Public doctor catalog endpoints."""
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -28,7 +29,7 @@ async def list_doctors(
     specialization: str | None = Query(None),
     board_role: list[str] | None = Query(None, description="pravlenie, president"),
     search: str | None = Query(None, min_length=2, description="Поиск по ФИО (мин. 2 символа)"),
-) -> dict:
+) -> dict[str, Any]:
     """Пагинированный список активных врачей с фильтрацией."""
     svc = DoctorCatalogService(db)
     return await svc.list_doctors(

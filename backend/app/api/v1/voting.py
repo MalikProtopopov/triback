@@ -37,7 +37,7 @@ router = APIRouter()
 async def get_active_session(
     payload: dict[str, Any] = require_role("doctor"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Возвращает текущую активную сессию голосования (если есть) с кандидатами
     и информацией, голосовал ли пользователь.
 
@@ -60,7 +60,7 @@ async def cast_vote(
     body: VoteRequest,
     payload: dict[str, Any] = require_role("doctor"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Голосует за кандидата. Каждый врач может проголосовать один раз.
 
     - **401** — не авторизован
@@ -86,7 +86,7 @@ async def list_voting_sessions(
     status: str | None = Query(None, description="Фильтр по статусу: active, finished, draft"),
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> PaginatedResponse:
+) -> PaginatedResponse[dict[str, Any]]:
     """Пагинированный список всех сессий голосования.
 
     - **401** — не авторизован
@@ -106,7 +106,7 @@ async def get_voting_session(
     session_id: UUID,
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Полная информация о сессии голосования, включая список кандидатов
     с именами и фотографиями.
 
@@ -127,7 +127,7 @@ async def create_voting_session(
     body: VotingSessionCreateRequest,
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Создаёт новую сессию голосования с кандидатами.
 
     - **401** — не авторизован
@@ -150,7 +150,7 @@ async def update_voting_session(
     body: VotingSessionUpdateRequest,
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Обновляет параметры сессии (название, статус, даты).
 
     - **401** — не авторизован
@@ -171,7 +171,7 @@ async def get_voting_results(
     session_id: UUID,
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Детальные результаты голосования с подсчётом голосов по кандидатам.
 
     - **401** — не авторизован

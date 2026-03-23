@@ -41,7 +41,7 @@ class DashboardResponse(BaseModel):
 async def get_dashboard(
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Агрегированные метрики платформы: пользователи, подписки, платежи,
     мероприятия, очередь модерации.
 

@@ -3,7 +3,7 @@
 import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from argon2 import PasswordHasher
@@ -49,8 +49,10 @@ def create_access_token(user_id: UUID, role: str) -> str:
         "type": "access",
         "iat": now,
         "exp": expire,
+        "aud": settings.JWT_AUDIENCE,
+        "iss": settings.JWT_ISSUER,
     }
-    return jwt.encode(payload, _load_private_key(), algorithm=ALGORITHM)
+    return cast(str, jwt.encode(payload, _load_private_key(), algorithm=ALGORITHM))
 
 
 def create_refresh_token(user_id: UUID, jti: str) -> str:
@@ -63,15 +65,21 @@ def create_refresh_token(user_id: UUID, jti: str) -> str:
         "type": "refresh",
         "iat": now,
         "exp": expire,
+        "aud": settings.JWT_AUDIENCE,
+        "iss": settings.JWT_ISSUER,
     }
-    return jwt.encode(payload, _load_private_key(), algorithm=ALGORITHM)
+    return cast(str, jwt.encode(payload, _load_private_key(), algorithm=ALGORITHM))
 
 
 def decode_token(token: str) -> dict[str, Any] | None:
     """Decode and validate a JWT token using the RS256 public key."""
     try:
         payload: dict[str, Any] = jwt.decode(
-            token, _load_public_key(), algorithms=[ALGORITHM]
+            token,
+            _load_public_key(),
+            algorithms=[ALGORITHM],
+            audience=settings.JWT_AUDIENCE,
+            issuer=settings.JWT_ISSUER,
         )
         return payload
     except JWTError:

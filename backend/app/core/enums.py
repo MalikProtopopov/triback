@@ -74,6 +74,12 @@ class NotificationStatus(StrEnum):
     FAILED = "failed"
 
 
+class ReceiptStatus(StrEnum):
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 class ModerationAction(StrEnum):
     APPROVE = "approve"
     REJECT = "reject"

@@ -21,8 +21,8 @@ from app.api.v1.settings_admin import router as settings_admin_router
 from app.api.v1.subscriptions import router as subscriptions_router
 from app.api.v1.telegram import router as telegram_router
 from app.api.v1.telegram_admin import router as telegram_admin_router
-from app.api.v1.voting import router as voting_router
 from app.api.v1.users_admin import router as users_admin_router
+from app.api.v1.voting import router as voting_router
 from app.api.v1.webhooks import router as webhooks_router
 
 router = APIRouter(prefix="/api/v1")

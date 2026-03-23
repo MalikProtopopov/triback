@@ -1,5 +1,6 @@
 """Profile router — personal/public profile, photo/diploma uploads, my events."""
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
@@ -19,6 +20,7 @@ from app.schemas.profile import (
     PublicProfileResponse,
     PublicProfileUpdate,
 )
+from app.schemas.shared import CityNested
 from app.services import file_service
 from app.services.profile_service import ProfileService
 
@@ -43,9 +45,9 @@ async def get_personal(
     svc = ProfileService(db)
     profile = await svc.get_personal(user_id)
 
-    city_data = None
+    city_data: CityNested | None = None
     if profile.city:
-        city_data = {"id": profile.city.id, "name": profile.city.name}
+        city_data = CityNested(id=profile.city.id, name=profile.city.name)
 
     documents = [
         DocumentNested(
@@ -115,7 +117,7 @@ async def upload_diploma_photo(
     svc = ProfileService(db)
     s3_key = await svc.upload_diploma_photo(user_id, file)
     return DiplomaPhotoResponse(
-        diploma_photo_url=file_service.build_media_url(s3_key),
+        diploma_photo_url=file_service.build_media_url(s3_key) or "",
         message="Фото диплома загружено",
     )
 
@@ -200,7 +202,7 @@ async def list_my_events(
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-) -> dict:
+) -> dict[str, Any]:
     """Список мероприятий, на которые пользователь зарегистрирован (confirmed).
 
     - **401** — не авторизован

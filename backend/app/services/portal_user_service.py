@@ -90,8 +90,8 @@ class PortalUserService:
             dp_q = await self.db.execute(
                 select(DoctorProfile).where(DoctorProfile.user_id.in_(u_ids))
             )
-            for dp in dp_q.scalars().all():
-                dp_map[dp.user_id] = dp
+            for doc_profile in dp_q.scalars().all():
+                dp_map[doc_profile.user_id] = doc_profile
 
         sub_map: dict[UUID, SubscriptionNested] = {}
         doctor_user_ids = [uid for uid, roles in roles_map.items() if "doctor" in roles]

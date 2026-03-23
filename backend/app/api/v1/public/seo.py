@@ -1,5 +1,7 @@
 """Public SEO metadata endpoint."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +21,7 @@ router = APIRouter()
 async def get_seo_page(
     slug: str,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Возвращает SEO-метатеги для указанной страницы по slug.
 
     - **404** — SEO-страница не найдена

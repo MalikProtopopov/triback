@@ -90,6 +90,7 @@ async def test_telegram_webhook_binds_user(
     monkeypatch,
 ):
     monkeypatch.setattr("app.core.config.settings.TELEGRAM_WEBHOOK_SECRET", "")
+    monkeypatch.setattr("app.core.config.settings.DEBUG", True)
 
     binding = TelegramBinding(
         user_id=doctor_user.id,
@@ -143,6 +144,7 @@ async def test_telegram_webhook_redis_key_cleaned(
 ):
     """BUG-1 fix: Verify that Redis key is deleted when binding succeeds."""
     monkeypatch.setattr("app.core.config.settings.TELEGRAM_WEBHOOK_SECRET", "")
+    monkeypatch.setattr("app.core.config.settings.DEBUG", True)
 
     binding = TelegramBinding(
         user_id=doctor_user.id,
@@ -180,6 +182,18 @@ async def test_telegram_webhook_redis_key_cleaned(
     assert resp.status_code == 200
 
     assert "tg_auth:XYZ789" not in _store
+
+
+async def test_telegram_legacy_webhook_forbidden_without_secret_in_production(
+    client: AsyncClient, monkeypatch
+):
+    """Legacy /webhook must reject when bot token is set but webhook secret is empty (non-DEBUG)."""
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False)
+    monkeypatch.setattr("app.core.config.settings.TELEGRAM_WEBHOOK_SECRET", "")
+    monkeypatch.setattr("app.core.config.settings.TELEGRAM_BOT_TOKEN", "123:fake-token")
+    monkeypatch.setattr("app.core.config.settings.TELEGRAM_CHANNEL_ID", "-1001")
+    resp = await client.post("/api/v1/telegram/webhook", json={"update_id": 1})
+    assert resp.status_code == 403
 
 
 async def test_telegram_webhook_rejects_bad_secret(

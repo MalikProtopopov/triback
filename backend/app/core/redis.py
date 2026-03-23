@@ -1,5 +1,7 @@
 """Redis connection pool and helpers."""
 
+from __future__ import annotations
+
 from redis.asyncio import ConnectionPool, Redis
 
 from app.core.config import settings
@@ -19,15 +21,15 @@ def get_redis_pool() -> ConnectionPool:
     return _redis_pool
 
 
-async def get_redis() -> Redis:  # type: ignore[type-arg]
-    """FastAPI dependency that provides a Redis client."""
+async def get_redis() -> Redis:
+    """FastAPI dependency that provides a Redis client (decode_responses=True → str)."""
     return Redis(connection_pool=get_redis_pool())
 
 
 async def check_redis_connection() -> bool:
     """Check if Redis is reachable. Used for health checks."""
     try:
-        client: Redis = Redis(connection_pool=get_redis_pool())  # type: ignore[type-arg]
+        client: Redis = Redis(connection_pool=get_redis_pool())
         await client.ping()
         return True
     except Exception:

@@ -1,5 +1,7 @@
 """Public article endpoints."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +29,7 @@ async def list_articles(
     offset: int = Query(0, ge=0),
     theme_slug: str | None = Query(None, description="Фильтр по slug темы"),
     search: str | None = Query(None, min_length=2, description="Полнотекстовый поиск"),
-) -> dict:
+) -> dict[str, Any]:
     """Пагинированный список опубликованных статей."""
     svc = ArticlePublicService(db)
     return await svc.list_articles(
@@ -44,7 +46,7 @@ async def list_article_themes(
     db: AsyncSession = Depends(get_db_session),
     active: bool | None = Query(None, description="Фильтр по активности"),
     has_articles: bool | None = Query(None, description="Только темы со статьями"),
-) -> dict:
+) -> dict[str, Any]:
     """Список тем для фильтрации статей."""
     svc = ArticlePublicService(db)
     return await svc.list_article_themes(active=active, has_articles=has_articles)

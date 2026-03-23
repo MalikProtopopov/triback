@@ -1,7 +1,5 @@
 """Webhook endpoints — YooKassa & Moneta payment notifications."""
 
-from __future__ import annotations
-
 from uuid import UUID
 
 import structlog
@@ -12,20 +10,29 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.enums import PaymentStatus
+from app.core.enums import PaymentStatus, ReceiptStatus
 from app.core.exceptions import ForbiddenError
+from app.core.logging_privacy import (
+    moneta_params_for_log,
+    moneta_receipt_body_summary,
+)
+from app.core.rate_limit import limiter
 from app.core.redis import get_redis
 from app.models.subscriptions import Payment, Receipt
 from app.schemas.payments import WebhookPayload
 from app.services.payment_providers.moneta_client import MonetaPaymentProvider
+from app.services.payment_utils import is_moneta_receipt_webhook_authorized
+from app.services.payment_webhook_routing import (
+    YOOKASSA_WEBHOOK_DEDUP_KEY_PREFIX,
+    YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS,
+    MonetaCheckResultCode,
+)
 from app.services.payment_webhook_service import PaymentWebhookService
 from app.services.subscription_service import SubscriptionService
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/webhooks")
-
-_DEDUP_TTL = 86400
 
 
 # ------------------------------------------------------------------
@@ -42,13 +49,27 @@ _DEDUP_TTL = 86400
         500: {"description": "Ошибка обработки (webhook будет повторён)"},
     },
 )
+@limiter.limit("120/minute")
 async def yookassa_webhook(
     request: Request,
     body: WebhookPayload,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> JSONResponse:
-    """YooKassa payment status notifications (kept for backward compat)."""
+    """YooKassa payment status notifications (kept for backward compat).
+
+    Security trust model: IP whitelist only (``YOOKASSA_IP_WHITELIST`` env var).
+    YooKassa does not issue a per-merchant HMAC secret for webhooks; their official
+    recommendation is to restrict incoming connections to their published IP ranges
+    (https://yookassa.ru/developers/using-api/webhooks#security).
+
+    Threat vector: if the network-layer IP filtering is bypassed (e.g. misconfigured
+    proxy, SSRF), an attacker could inject arbitrary payment events.  Mitigations:
+    - Keep ``YOOKASSA_IP_WHITELIST`` up-to-date with the official YooKassa IP list.
+    - Validate every ``external_id`` against the YooKassa API before accepting the event
+      (optional double-check for critical flows — call ``GET /payments/{id}`` to confirm
+      ``status`` server-side before marking payment as succeeded).
+    """
     forwarded = request.headers.get("x-forwarded-for")
     client_ip = forwarded.split(",")[0].strip() if forwarded else ""
     if not client_ip and request.client:
@@ -58,9 +79,11 @@ async def yookassa_webhook(
     event_type = payload.get("event", "")
     external_id = payload.get("object", {}).get("id", "")
 
-    dedup_key = f"webhook:dedup:{event_type}:{external_id}"
+    dedup_key = f"{YOOKASSA_WEBHOOK_DEDUP_KEY_PREFIX}{event_type}:{external_id}"
     if external_id:
-        already = await redis.set(dedup_key, "1", ex=_DEDUP_TTL, nx=True)
+        already = await redis.set(
+            dedup_key, "1", ex=YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS, nx=True
+        )
         if not already:
             return JSONResponse(content={"status": "ok"})
 
@@ -99,10 +122,11 @@ async def _collect_moneta_params(request: Request) -> dict[str, str]:
     methods=["GET", "POST"],
     summary="Moneta Pay URL webhook",
 )
+@limiter.limit("120/minute")
 async def moneta_pay_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> PlainTextResponse:
     """Moneta Pay URL — вызывается Moneta после успешной оплаты.
 
@@ -123,7 +147,9 @@ async def moneta_pay_webhook(
     has_key_params = all(params.get(k) for k in key_params)
     if not params or not has_key_params:
         dedup_warn_key = "webhook:moneta:empty_warn"
-        should_warn = await redis.set(dedup_warn_key, "1", ex=_DEDUP_TTL, nx=True)
+        should_warn = await redis.set(
+            dedup_warn_key, "1", ex=YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS, nx=True
+        )
         if should_warn:
             logger.warning(
                 "moneta_pay_request_empty_or_malformed",
@@ -138,14 +164,16 @@ async def moneta_pay_webhook(
         method=request.method,
         client_ip=client_ip,
         user_agent=user_agent[:80] if user_agent else None,
-        params=params,
+        params_safe=moneta_params_for_log(params),
     )
     mnt_operation_id = params.get("MNT_OPERATION_ID", "")
     mnt_command = params.get("MNT_COMMAND", "")
 
     dedup_key = f"webhook:dedup:moneta:{mnt_operation_id}"
     if mnt_operation_id:
-        is_new = await redis.set(dedup_key, "1", ex=_DEDUP_TTL, nx=True)
+        is_new = await redis.set(
+            dedup_key, "1", ex=YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS, nx=True
+        )
         if not is_new:
             return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
 
@@ -153,7 +181,14 @@ async def moneta_pay_webhook(
     try:
         webhook_data = await provider.verify_webhook(params)
     except ValueError as e:
-        logger.warning("moneta_signature_invalid", reason=str(e), params=params)
+        logger.warning(
+            "moneta_signature_invalid",
+            reason=str(e),
+            params_safe=moneta_params_for_log(params),
+        )
+        # Release dedup key so a legitimate retry isn't permanently blocked.
+        if mnt_operation_id:
+            await redis.delete(dedup_key)
         return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
 
     if mnt_command in ("CANCELLED_DEBIT", "CANCELLED_CREDIT"):
@@ -214,6 +249,7 @@ async def moneta_pay_webhook(
     methods=["GET", "POST"],
     summary="Moneta Check URL",
 )
+@limiter.limit("120/minute")
 async def moneta_check_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
@@ -221,35 +257,48 @@ async def moneta_check_webhook(
     """Moneta Check URL — предварительная проверка заказа перед оплатой.
 
     Moneta отправляет запрос для валидации: существует ли платёж, корректна ли
-    сумма. Возвращает XML-ответ с кодом `200` (OK), `402` (не найден) или `500`
-    (ошибка подписи).
+    сумма. XML-ответ (см. также docs/MONETA_WEBHOOK_TROUBLESHOOTING.md):
+
+    - ``200`` — заказ найден и доступен для оплаты (``pending``) или уже оплачен
+      (``succeeded``). Для ``pending`` в ответ включается ``MNT_AMOUNT``.
+    - ``402`` — заказ не найден (неверный ID) или недоступен для оплаты
+      (``failed`` / ``expired`` / и т.д.).
+    - ``500`` — неверная подпись или несовпадение суммы с заказом.
     """
     params = await _collect_moneta_params(request)
     mnt_id = params.get("MNT_ID", "")
     mnt_transaction_id = params.get("MNT_TRANSACTION_ID", "")
 
-    logger.info("moneta_check_request", params=params)
+    logger.info("moneta_check_request", params_safe=moneta_params_for_log(params))
 
     provider = MonetaPaymentProvider()
 
     try:
         await provider.verify_webhook(params)
     except ValueError:
-        logger.warning("moneta_check_signature_invalid", params=params)
-        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "500")
-        logger.info("moneta_check_response_xml", xml=xml)
+        logger.warning(
+            "moneta_check_signature_invalid",
+            params_safe=moneta_params_for_log(params),
+        )
+        xml = provider.build_check_response(
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.INVALID_SIGNATURE_OR_AMOUNT_MISMATCH
+        )
+        logger.info("moneta_check_response_xml", xml_len=len(xml))
         return Response(content=xml, media_type="application/xml; charset=utf-8")
 
     mnt_operation_id = params.get("MNT_OPERATION_ID", "")
 
+    payment: Payment | None = None
     try:
         payment_id = UUID(mnt_transaction_id)
+    except ValueError:
+        payment_id = None
+
+    if payment_id is not None:
         result = await db.execute(
             select(Payment).where(Payment.id == payment_id).with_for_update()
         )
         payment = result.scalar_one_or_none()
-    except (ValueError, Exception):
-        payment = None
 
     if payment and mnt_operation_id and not payment.moneta_operation_id:
         payment.moneta_operation_id = mnt_operation_id
@@ -257,21 +306,46 @@ async def moneta_check_webhook(
             payment.external_payment_id = mnt_operation_id
         await db.commit()
 
-    if payment and payment.status == PaymentStatus.PENDING:
-        amount_str = f"{float(payment.amount):.2f}"
+    if not payment:
         xml = provider.build_check_response(
-            mnt_id, mnt_transaction_id, "402", amount=amount_str
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.NOT_FOUND_OR_UNAVAILABLE
         )
-    elif payment and payment.status == PaymentStatus.SUCCEEDED:
-        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "200")
+    elif payment.status == PaymentStatus.PENDING:
+        amount_str = f"{float(payment.amount):.2f}"
+        req_amount = (params.get("MNT_AMOUNT") or "").strip()
+        if req_amount:
+            try:
+                req_norm = f"{float(req_amount):.2f}"
+            except ValueError:
+                req_norm = ""
+            if req_norm and req_norm != amount_str:
+                xml = provider.build_check_response(
+                    mnt_id,
+                    mnt_transaction_id,
+                    MonetaCheckResultCode.INVALID_SIGNATURE_OR_AMOUNT_MISMATCH,
+                )
+            else:
+                xml = provider.build_check_response(
+                    mnt_id, mnt_transaction_id, MonetaCheckResultCode.OK, amount=amount_str
+                )
+        else:
+            xml = provider.build_check_response(
+                mnt_id, mnt_transaction_id, MonetaCheckResultCode.OK, amount=amount_str
+            )
+    elif payment.status == PaymentStatus.SUCCEEDED:
+        xml = provider.build_check_response(
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.OK
+        )
     else:
-        xml = provider.build_check_response(mnt_id, mnt_transaction_id, "500")
+        xml = provider.build_check_response(
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.NOT_FOUND_OR_UNAVAILABLE
+        )
 
     logger.info(
         "moneta_check_response",
         payment_found=payment is not None,
-        payment_status=payment.status if payment else None,
-        xml=xml,
+        payment_status=str(payment.status)[:32] if payment else None,
+        xml_len=len(xml),
     )
 
     return Response(content=xml, media_type="application/xml; charset=utf-8")
@@ -286,6 +360,7 @@ async def moneta_check_webhook(
     "/moneta/receipt",
     summary="Moneta receipt webhook",
 )
+@limiter.limit("120/minute")
 async def moneta_receipt_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
@@ -295,15 +370,38 @@ async def moneta_receipt_webhook(
     Вызывается после формирования чека. Содержит JSON с `operation`
     (ID операции Moneta) и `receipt` (URL чека). Сохраняет `Receipt` в БД
     и отправляет email пользователю со ссылкой на скачивание чека.
+
+    Аутентификация: задайте ``MONETA_RECEIPT_WEBHOOK_SECRET`` и передавайте тот же
+    токен в заголовке ``X-Moneta-Receipt-Secret``, либо ``MONETA_RECEIPT_IP_ALLOWLIST``
+    (CIDR через запятую, как у YooKassa). В ``DEBUG`` без настроек — допускается
+    с предупреждением в логах; в production без секрета и allowlist — 403.
     """
-    # TODO: add IP whitelist or shared-secret auth when Moneta provides IP ranges
     forwarded = request.headers.get("x-forwarded-for")
     client_ip = forwarded.split(",")[0].strip() if forwarded else ""
     if not client_ip and request.client:
         client_ip = request.client.host
 
+    header_secret = request.headers.get("x-moneta-receipt-secret")
+    if not is_moneta_receipt_webhook_authorized(
+        client_ip=client_ip, header_secret=header_secret
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Moneta receipt webhook authentication failed",
+                    "details": {},
+                }
+            },
+        )
+
     body = await request.json()
-    logger.info("moneta_receipt_webhook", body=body, client_ip=client_ip)
+    logger.info(
+        "moneta_receipt_webhook",
+        body_summary=moneta_receipt_body_summary(body),
+        client_ip=client_ip,
+    )
 
     operation = body.get("operation")
     receipt_url = body.get("receipt")
@@ -332,14 +430,14 @@ async def moneta_receipt_webhook(
     if receipt:
         if receipt_url and receipt_url is not False:
             receipt.receipt_url = str(receipt_url)
-            receipt.status = "succeeded"  # type: ignore[assignment]
+            receipt.status = ReceiptStatus.SUCCEEDED
     else:
         receipt = Receipt(
             payment_id=payment.id,
             receipt_type=receipt_type,
             receipt_url=str(receipt_url) if receipt_url and receipt_url is not False else None,
             amount=payment.amount,
-            status="succeeded",
+            status=ReceiptStatus.SUCCEEDED,
         )
         db.add(receipt)
 
@@ -363,5 +461,110 @@ async def moneta_receipt_webhook(
             await notify_user_receipt_available.kiq(
                 str(payment.user_id), float(payment.amount)
             )
+
+    return JSONResponse(content={"status": "ok"})
+
+
+# ------------------------------------------------------------------
+# YooKassa v2 — inbox-based webhook (feature-flagged)
+# ------------------------------------------------------------------
+
+
+@router.post(
+    "/yookassa/v2",
+    summary="YooKassa webhook v2 (inbox + TaskIQ)",
+    include_in_schema=False,
+)
+@limiter.limit("120/minute")
+async def yookassa_webhook_v2(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> JSONResponse:
+    """Inbox-based YooKassa webhook handler.
+
+    Pipeline: parse → Redis dedup → persist raw to DB → verify IP → enqueue TaskIQ.
+
+    Only active when ``WEBHOOK_INBOX_ENABLED=true`` in settings.  When the flag
+    is off, returns 404 so traffic remains on the legacy endpoint.
+    """
+    import json
+    import uuid as _uuid
+
+    from app.core.config import settings as _settings
+
+    if not _settings.WEBHOOK_INBOX_ENABLED:
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+    from app.models.payment_webhook_inbox import PaymentWebhookInbox
+    from app.services.payment_utils import is_ip_allowed
+    from app.tasks.payment_webhook_tasks import process_payment_webhook_inbox
+
+    raw_bytes = await request.body()
+    forwarded = request.headers.get("x-forwarded-for")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+    if not client_ip and request.client:
+        client_ip = request.client.host
+
+    try:
+        body = json.loads(raw_bytes.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JSONResponse(status_code=400, content={"status": "bad_request"})
+
+    event_type = body.get("event", "")
+    ext_id = (body.get("object") or {}).get("id", "")
+    dedup_redis = f"{YOOKASSA_WEBHOOK_DEDUP_KEY_PREFIX}v2:{event_type}:{ext_id}"
+
+    if ext_id:
+        already = await redis.set(dedup_redis, "1", ex=YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS, nx=True)
+        if not already:
+            return JSONResponse(content={"status": "ok"})
+
+    external_event_key = f"yookassa:{event_type}:{ext_id}"
+    row = PaymentWebhookInbox(
+        id=_uuid.uuid4(),
+        provider="yookassa",
+        external_event_key=external_event_key,
+        raw_headers=dict(request.headers),
+        raw_body=body,
+        client_ip=client_ip,
+        status="received",
+    )
+    db.add(row)
+    try:
+        await db.flush()
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        if ext_id:
+            await redis.delete(dedup_redis)
+        logger.exception("webhook_inbox_persist_failed", provider="yookassa")
+        return JSONResponse(status_code=500, content={"status": "error"})
+
+    # IP verification — after persist so the raw payload is always stored.
+    if not is_ip_allowed(client_ip):
+        logger.warning("webhook_v2_ip_rejected", ip=client_ip)
+        row.status = "dead"
+        row.verify_error = f"IP not in whitelist: {client_ip}"
+        try:
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning("webhook_inbox_dead_commit_failed")
+        if ext_id:
+            await redis.delete(dedup_redis)
+        return JSONResponse(status_code=403, content={"status": "forbidden"})
+
+    row.status = "verified"
+    try:
+        await db.commit()
+    except Exception:
+        logger.exception("webhook_inbox_verify_update_failed")
+
+    try:
+        await process_payment_webhook_inbox.kiq(str(row.id))
+    except Exception:
+        # Queue unavailable — the cron ``retry_stale_webhook_inbox_rows`` will
+        # pick up any ``verified`` rows without a ``next_run_at`` set.
+        logger.exception("webhook_inbox_enqueue_failed", inbox_id=str(row.id))
 
     return JSONResponse(content={"status": "ok"})

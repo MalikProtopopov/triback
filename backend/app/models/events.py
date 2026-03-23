@@ -2,6 +2,7 @@
 event_galleries, event_gallery_photos, event_recordings."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -91,7 +92,9 @@ class EventTariff(Base, UUIDMixin):
     details: Mapped[str | None] = mapped_column(Text)
     price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     member_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
-    benefits: Mapped[dict | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    benefits: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
     seats_limit: Mapped[int | None] = mapped_column(Integer)
     seats_taken: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)

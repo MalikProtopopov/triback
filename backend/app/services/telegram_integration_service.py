@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import structlog
@@ -28,7 +28,7 @@ async def _telegram_api(
     *,
     params: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Call Telegram Bot API. Raises on HTTP error."""
     url = f"{_BASE_URL.format(token=token)}/{method}"
     async with httpx.AsyncClient(timeout=15) as client:
@@ -44,7 +44,7 @@ async def _telegram_api(
             raise AppValidationError(
                 data.get("description", "Telegram API error")
             )
-        return data
+        return cast(dict[str, Any], data)
 
 
 async def _validate_token(bot_token: str) -> str:
@@ -54,7 +54,7 @@ async def _validate_token(bot_token: str) -> str:
     username = user.get("username")
     if not username:
         raise AppValidationError("Bot has no username")
-    return username
+    return cast(str, username)
 
 
 async def get_telegram_config(db: AsyncSession) -> tuple[str, int] | None:

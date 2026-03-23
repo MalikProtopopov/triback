@@ -99,8 +99,8 @@ def resize_image(
     thumb_size: tuple[int, int] = (200, 200),
 ) -> tuple[bytes, bytes]:
     """Resize image to max_size and create a thumbnail. Returns (resized, thumbnail) as JPEG bytes."""
-    img = Image.open(io.BytesIO(data))
-    img = img.convert("RGB")
+    opened = Image.open(io.BytesIO(data))
+    img: Image.Image = opened.convert("RGB")
 
     resized = img.copy()
     resized.thumbnail(max_size, Image.Resampling.LANCZOS)

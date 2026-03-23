@@ -1,5 +1,7 @@
 """Profile-related background tasks — Excel import, certificate generation, photo resize."""
 
+from __future__ import annotations
+
 import base64
 import io
 import json
@@ -8,6 +10,7 @@ from uuid import UUID
 import structlog
 from PIL import Image
 
+from app.core.config import settings
 from app.tasks import broker
 
 logger = structlog.get_logger(__name__)
@@ -15,7 +18,7 @@ logger = structlog.get_logger(__name__)
 MAX_PHOTO_SIZE = (800, 800)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def process_excel_import(task_id: str, file_bytes_b64: str) -> None:
     """Decode base64 Excel file, parse rows and create doctor profiles.
 
@@ -37,7 +40,7 @@ async def process_excel_import(task_id: str, file_bytes_b64: str) -> None:
     from app.models.users import User
 
     file_bytes = base64.b64decode(file_bytes_b64)
-    redis: Redis = Redis(connection_pool=get_redis_pool())  # type: ignore[type-arg]
+    redis: Redis = Redis(connection_pool=get_redis_pool())
 
     errors: list[dict[str, Any]] = []
     imported = 0
@@ -122,7 +125,7 @@ async def process_excel_import(task_id: str, file_bytes_b64: str) -> None:
     logger.info("excel_import_done", task_id=task_id, imported=imported, errors=len(errors))
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def generate_certificate(doctor_profile_id: str) -> None:
     """Generate a membership certificate PDF for a doctor profile, idempotently."""
     from datetime import UTC, datetime
@@ -160,7 +163,7 @@ async def generate_certificate(doctor_profile_id: str) -> None:
         logger.exception("generate_certificate_failed", profile_id=doctor_profile_id)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def resize_profile_photo(s3_key: str) -> None:
     """Download a profile photo from S3, resize to 800x800, re-upload."""
     try:
@@ -169,13 +172,13 @@ async def resize_profile_photo(s3_key: str) -> None:
         session = file_service._get_s3_session()
         async with session.client(**file_service._s3_client_kwargs()) as s3:
             response = await s3.get_object(
-                Bucket=file_service.settings.S3_BUCKET,
+                Bucket=settings.S3_BUCKET,
                 Key=s3_key,
             )
             data = await response["Body"].read()
 
-        img = Image.open(io.BytesIO(data))
-        img = img.convert("RGB")
+        opened = Image.open(io.BytesIO(data))
+        img: Image.Image = opened.convert("RGB")
         img.thumbnail(MAX_PHOTO_SIZE, Image.Resampling.LANCZOS)
 
         buf = io.BytesIO()
@@ -184,7 +187,7 @@ async def resize_profile_photo(s3_key: str) -> None:
 
         async with session.client(**file_service._s3_client_kwargs()) as s3:
             await s3.put_object(
-                Bucket=file_service.settings.S3_BUCKET,
+                Bucket=settings.S3_BUCKET,
                 Key=s3_key,
                 Body=resized_bytes,
                 ContentType="image/jpeg",

@@ -1,17 +1,20 @@
 """Telegram tasks — admin notifications, channel management, user notifications."""
 
+from __future__ import annotations
+
 import structlog
 from sqlalchemy import select
 
+from app.core.logging_privacy import mask_email_for_log
+from app.services.telegram_service import TelegramService
 from app.tasks import broker
 
 logger = structlog.get_logger(__name__)
 
 
-async def _get_svc_async():
+async def _get_svc_async() -> TelegramService:
     from app.core.database import AsyncSessionLocal
     from app.services.telegram_integration_service import get_telegram_config
-    from app.services.telegram_service import TelegramService
 
     async with AsyncSessionLocal() as db:
         config = await get_telegram_config(db)
@@ -43,10 +46,9 @@ async def _send_to_user(user_id: str, text: str) -> bool:
     return False
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_admin_new_registration(user_id: str) -> None:
     """Notify admin chat about a new doctor registration."""
-    from app.core.config import settings
 
     svc = await _get_svc_async()
     if not svc._token or not svc._owner_chat_id:
@@ -60,7 +62,7 @@ async def notify_admin_new_registration(user_id: str) -> None:
         logger.exception("notify_admin_failed", user_id=user_id)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def add_user_to_channel(tg_user_id: int) -> None:
     """Add user to the private Telegram channel."""
     svc = await _get_svc_async()
@@ -70,7 +72,7 @@ async def add_user_to_channel(tg_user_id: int) -> None:
         logger.exception("add_to_channel_failed", tg_user_id=tg_user_id)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def remove_user_from_channel(tg_user_id: int) -> None:
     """Remove user from the private Telegram channel."""
     svc = await _get_svc_async()
@@ -80,7 +82,7 @@ async def remove_user_from_channel(tg_user_id: int) -> None:
         logger.exception("remove_from_channel_failed", tg_user_id=tg_user_id)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_moderation_result(
     user_id: str, status: str, comment: str | None = None
 ) -> None:
@@ -92,7 +94,7 @@ async def notify_user_moderation_result(
     await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_draft_result(
     user_id: str, status: str, rejection_reason: str | None = None
 ) -> None:
@@ -106,7 +108,7 @@ async def notify_user_draft_result(
     await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_payment_succeeded(
     user_id: str, amount: float, product_type: str
 ) -> None:
@@ -119,14 +121,14 @@ async def notify_user_payment_succeeded(
     await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_payment_failed(user_id: str) -> None:
     """Notify user via Telegram about failed payment."""
     text = "Платёж не удался ❌\nПожалуйста, попробуйте снова или свяжитесь с поддержкой."
     await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_event_ticket(
     user_id: str, event_title: str, event_date: str, amount: float
 ) -> None:
@@ -140,21 +142,21 @@ async def notify_user_event_ticket(
     await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_receipt_available(user_id: str, amount: float) -> None:
     """Notify user via Telegram that their receipt is ready."""
     text = f"Ваш чек готов 🧾\nСумма: {amount:.2f} ₽\nЧек доступен в личном кабинете."
     await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_manual_reminder(user_id: str, message: str | None = None) -> bool:
     """Send manual reminder from admin to user's Telegram. Returns True if sent."""
     text = message if message else "Ваша подписка скоро истекает. Не забудьте продлить членство."
     return await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_user_subscription_expiring(user_id: str, days_left: int) -> None:
     """Notify user via Telegram that their subscription is expiring soon."""
     text = (
@@ -164,7 +166,7 @@ async def notify_user_subscription_expiring(user_id: str, days_left: int) -> Non
     await _send_to_user(user_id, text)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_admin_new_draft(user_id: str, full_name: str) -> None:
     """Notify admin chat about a new public profile draft submitted for review."""
     svc = await _get_svc_async()
@@ -182,7 +184,7 @@ async def notify_admin_new_draft(user_id: str, full_name: str) -> None:
         logger.exception("notify_admin_new_draft_failed", user_id=user_id)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def notify_admin_payment_received(
     user_email: str, amount: float, product_type: str
 ) -> None:
@@ -201,4 +203,7 @@ async def notify_admin_payment_received(
     try:
         await svc.send_message(int(svc._owner_chat_id), text)
     except Exception:
-        logger.exception("notify_admin_payment_failed", email=user_email)
+        logger.exception(
+            "notify_admin_payment_failed",
+            email_masked=mask_email_for_log(user_email),
+        )

@@ -11,8 +11,8 @@ from app.core.openapi import error_responses
 from app.core.pagination import PaginatedResponse
 from app.core.security import require_role
 from app.schemas.users_admin import (
-    AdminUserCreateRequest,
     AdminUserCreatedResponse,
+    AdminUserCreateRequest,
     AdminUserDetailResponse,
     AdminUserListItem,
     AdminUserUpdateRequest,
@@ -37,7 +37,7 @@ async def list_staff_users(
     offset: int = Query(0, ge=0),
     role: str | None = Query(None, description="Фильтр по роли: admin, manager, accountant"),
     search: str | None = Query(None, min_length=2, description="Поиск по email"),
-) -> PaginatedResponse:
+) -> PaginatedResponse[AdminUserListItem]:
     """Пагинированный список пользователей с ролями admin/manager/accountant.
 
     - **401** -- не авторизован

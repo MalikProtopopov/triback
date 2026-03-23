@@ -1,5 +1,7 @@
 """Authentication service — registration, login, tokens, password/email management."""
 
+from __future__ import annotations
+
 import json
 from datetime import UTC, datetime
 from uuid import UUID
@@ -10,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError, UnauthorizedError
+from app.core.permissions import get_sidebar_sections_for_role
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -18,8 +21,8 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.core.permissions import get_sidebar_sections_for_role
 from app.models.users import Role, User, UserRoleAssignment
+from app.schemas.auth import CurrentUserResponse
 from app.tasks.email_tasks import (
     send_email_change_confirmation,
     send_password_reset_email,
@@ -48,7 +51,7 @@ def _pick_role(role_names: list[str]) -> str:
 
 
 class AuthService:
-    def __init__(self, db: AsyncSession, redis: Redis) -> None:  # type: ignore[type-arg]
+    def __init__(self, db: AsyncSession, redis: Redis) -> None:
         self.db = db
         self.redis = redis
 
@@ -199,6 +202,12 @@ class AuthService:
             jti = payload["jti"]
             await self.redis.delete(f"refresh:{user_id}:{jti}")
 
+    async def logout_all_sessions(self, user_id: UUID) -> None:
+        """Revoke every refresh session for this user (logout everywhere)."""
+        pattern = f"refresh:{user_id}:*"
+        async for key in self.redis.scan_iter(match=pattern):
+            await self.redis.delete(key)
+
     # ------------------------------------------------------------------
     # Password recovery
     # ------------------------------------------------------------------
@@ -209,13 +218,13 @@ class AuthService:
         if not user:
             return  # never reveal whether email exists
 
-        _STAFF_ROLES = {"admin", "manager", "accountant"}
+        staff_roles = {"admin", "manager", "accountant"}
         staff_role_q = await self.db.execute(
             select(Role.name)
             .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
             .where(
                 UserRoleAssignment.user_id == user.id,
-                Role.name.in_(list(_STAFF_ROLES)),
+                Role.name.in_(list(staff_roles)),
             )
         )
         is_staff = staff_role_q.scalar_one_or_none() is not None
@@ -298,10 +307,8 @@ class AuthService:
 
     async def get_current_user_info(
         self, user_id: str, role: str
-    ) -> "CurrentUserResponse":
+    ) -> CurrentUserResponse:
         """Return current user info with role and sidebar_sections for frontend."""
-        from app.schemas.auth import CurrentUserResponse
-
         user = await self.db.get(User, user_id)
         if not user:
             raise NotFoundError("User not found")

@@ -1,6 +1,7 @@
 """Pydantic schemas for doctor profile endpoints."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -43,7 +44,7 @@ class PersonalProfileUpdate(BaseModel):
 
 class PendingDraftNested(BaseModel):
     status: str
-    changes: dict
+    changes: dict[str, Any]
     submitted_at: datetime
     rejection_reason: str | None = None
     reviewed_at: datetime | None = None

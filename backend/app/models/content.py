@@ -2,6 +2,7 @@
 organization_documents, content_blocks, pages_seo."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -138,7 +139,7 @@ class ContentBlock(Base, UUIDMixin, TimestampMixin):
     link_url: Mapped[str | None] = mapped_column(String(500))
     link_label: Mapped[str | None] = mapped_column(String(255))
     device_type: Mapped[str] = mapped_column(String(10), server_default="both", nullable=False)
-    block_metadata: Mapped[dict | None] = mapped_column(JSONB)
+    block_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class PageSeo(Base, UUIDMixin):
@@ -156,7 +157,7 @@ class PageSeo(Base, UUIDMixin):
         String(50), server_default="summary_large_image"
     )
     canonical_url: Mapped[str | None] = mapped_column(String(500))
-    custom_meta: Mapped[dict | None] = mapped_column(JSONB)
+    custom_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default="now()", nullable=False
     )

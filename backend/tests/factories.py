@@ -7,6 +7,8 @@ async sessions with manual flush. Call them with the test db_session.
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from sqlalchemy import select
+
 from app.core.security import hash_password
 from app.models.cities import City
 from app.models.content import Article, OrganizationDocument, PageSeo
@@ -47,6 +49,9 @@ async def create_user(
 
 
 async def create_role(db, *, name: str, title: str | None = None) -> Role:
+    existing = (await db.execute(select(Role).where(Role.name == name))).scalar_one_or_none()
+    if existing is not None:
+        return existing
     role = Role(name=name, title=title or name.capitalize())
     db.add(role)
     await db.flush()

@@ -14,12 +14,8 @@ from app.core.exceptions import NotFoundError
 from app.models.cities import City
 from app.models.profiles import DoctorProfile, Specialization
 from app.models.subscriptions import Subscription
-from app.schemas.public import (
-    ContentBlockPublicNested,
-    DoctorPublicDetailResponse,
-    DoctorPublicListItem,
-    SeoNested,
-)
+from app.schemas.public import DoctorPublicDetailResponse, DoctorPublicListItem, SeoNested
+from app.schemas.shared import ContentBlockPublicNested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 

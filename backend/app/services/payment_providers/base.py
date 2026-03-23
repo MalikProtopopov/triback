@@ -26,7 +26,7 @@ class CreatePaymentResult:
 
     external_id: str
     payment_url: str
-    raw_response: dict = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -37,7 +37,7 @@ class WebhookData:
     external_id: str
     transaction_id: str
     amount: Decimal
-    raw_data: dict = field(default_factory=dict)
+    raw_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -46,7 +46,7 @@ class RefundResult:
 
     external_id: str
     status: str
-    raw_response: dict = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
 
 
 class PaymentProvider(ABC):

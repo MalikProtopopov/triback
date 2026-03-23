@@ -134,6 +134,41 @@ async def test_logout(client: AsyncClient, db_session: AsyncSession):
     assert "message" in logout_resp.json()
 
 
+async def test_logout_all_revokes_all_refresh_tokens(
+    client: AsyncClient, db_session: AsyncSession
+):
+    from tests.factories import create_user
+
+    await create_user(db_session, email="logout_all@test.com")
+    await db_session.commit()
+
+    login_resp = await client.post(
+        LOGIN_URL,
+        json={"email": "logout_all@test.com", "password": TEST_PASSWORD},
+    )
+    assert login_resp.status_code == 200
+    access = login_resp.json()["access_token"]
+    token_value = ""
+    for part in login_resp.headers.get("set-cookie", "").split(";"):
+        part = part.strip()
+        if part.startswith("refresh_token="):
+            token_value = part.split("=", 1)[1]
+            break
+    assert token_value
+
+    lo = await client.post(
+        "/api/v1/auth/logout-all",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert lo.status_code == 200
+
+    refresh_resp = await client.post(
+        REFRESH_URL,
+        cookies={"refresh_token": token_value},
+    )
+    assert refresh_resp.status_code == 401
+
+
 async def test_register_password_mismatch(client: AsyncClient):
     resp = await client.post(
         REGISTER_URL,

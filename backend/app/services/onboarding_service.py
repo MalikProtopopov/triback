@@ -1,6 +1,7 @@
 """Onboarding service — role selection, profile filling, document upload, submission."""
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -21,7 +22,7 @@ class OnboardingService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def get_status(self, user_id: UUID) -> dict:
+    async def get_status(self, user_id: UUID) -> dict[str, Any]:
         """Compute current onboarding status and next_step."""
         user = await self.db.get(User, user_id)
         if not user:
@@ -139,7 +140,7 @@ class OnboardingService:
             return "fill_profile"
         return "submit"
 
-    async def choose_role(self, user_id: UUID, role: str) -> dict:
+    async def choose_role(self, user_id: UUID, role: str) -> dict[str, Any]:
         """Assign a role to the user. If doctor, create an empty DoctorProfile."""
         role_names_result = await self.db.execute(
             select(Role.name)
@@ -148,8 +149,8 @@ class OnboardingService:
         )
         current_role_names = list(role_names_result.scalars().all())
 
-        _STAFF_ROLES = {"admin", "manager", "accountant"}
-        if any(r in current_role_names for r in _STAFF_ROLES):
+        staff_roles = {"admin", "manager", "accountant"}
+        if any(r in current_role_names for r in staff_roles):
             raise ConflictError(
                 "Пользователи с ролью сотрудника не могут проходить онбординг как врач"
             )
@@ -195,7 +196,9 @@ class OnboardingService:
             "moderation_status": DoctorStatus.PENDING_REVIEW if role == "doctor" else None,
         }
 
-    async def update_doctor_profile(self, user_id: UUID, data: dict) -> dict:
+    async def update_doctor_profile(
+        self, user_id: UUID, data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Partially update the doctor profile during onboarding."""
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == user_id)
@@ -266,7 +269,7 @@ class OnboardingService:
         await self.db.refresh(doc)
         return doc
 
-    async def submit(self, user_id: UUID) -> dict:
+    async def submit(self, user_id: UUID) -> dict[str, Any]:
         """Submit the doctor profile for moderation (initial or re-submit after rejection)."""
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == user_id)

@@ -15,10 +15,9 @@ from app.schemas.public import (
     ArticleDetailResponse,
     ArticleListItem,
     ArticleThemeResponse,
-    ContentBlockPublicNested,
     SeoNested,
 )
-from app.schemas.shared import ThemeNested
+from app.schemas.shared import ContentBlockPublicNested, ThemeNested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 

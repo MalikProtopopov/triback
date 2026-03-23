@@ -80,8 +80,8 @@ class EventMediaAdminService:
             await self.db.flush()
             photos.append(PhotoNested(
                 id=photo.id,
-                file_url=file_service.build_media_url(main_key),
-                thumbnail_url=file_service.build_media_url(thumb_key),
+                file_url=file_service.build_media_url(main_key) or "",
+                thumbnail_url=file_service.build_media_url(thumb_key) or "",
             ))
 
         await self.db.commit()
@@ -159,7 +159,7 @@ class EventMediaAdminService:
             rec.video_file_key = key
             rec.video_file_size = video_file.size
             rec.video_mime_type = video_file.content_type
-            rec.video_source = "uploaded"  # type: ignore[assignment]
+            rec.video_source = "uploaded"
 
         await self.db.commit()
         await self.db.refresh(rec)

@@ -25,7 +25,7 @@ router = APIRouter(prefix="/certificates")
 async def list_certificates(
     payload: dict[str, Any] = require_role("doctor"),
     db: AsyncSession = Depends(get_db_session),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Список сертификатов текущего врача (членство + участие в мероприятиях).
 
     - **401** — не авторизован

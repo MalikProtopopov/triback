@@ -1,70 +1,19 @@
-"""FastAPI dependencies: current user, pagination."""
+"""FastAPI dependencies — shim re-exporting ``app.core.deps``."""
 
-from typing import Any
-from uuid import UUID
+from app.core.deps import (
+    ACCESS_TOKEN_COOKIE_KEY,
+    get_current_user,
+    get_current_user_id,
+    get_optional_user_id,
+    get_pagination,
+    oauth2_scheme,
+)
 
-from fastapi import Cookie, Depends, Header, Query
-from fastapi.security import OAuth2PasswordBearer
-
-from app.core.exceptions import UnauthorizedError
-from app.core.security import decode_token
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
-
-ACCESS_TOKEN_COOKIE_KEY = "access_token"
-
-
-def _extract_token(
-    bearer: str | None = Depends(oauth2_scheme),
-    x_access_token: str | None = Header(None, alias="X-Access-Token"),
-    access_token_cookie: str | None = Cookie(None, alias=ACCESS_TOKEN_COOKIE_KEY),
-) -> str | None:
-    """Get token from Authorization, X-Access-Token header, or access_token cookie."""
-    if bearer:
-        return bearer
-    if x_access_token:
-        t = x_access_token.strip()
-        return t if t else None
-    if access_token_cookie:
-        t = access_token_cookie.strip()
-        return t if t else None
-    return None
-
-
-async def get_current_user(
-    token: str | None = Depends(_extract_token),
-) -> dict[str, Any]:
-    """Return the decoded JWT payload for the current authenticated user."""
-    if not token:
-        raise UnauthorizedError("Authentication required")
-    payload = decode_token(token)
-    if not payload or payload.get("type") != "access":
-        raise UnauthorizedError("Invalid or expired token")
-    return payload
-
-
-async def get_current_user_id(
-    payload: dict[str, Any] = Depends(get_current_user),
-) -> UUID:
-    """Return the UUID of the currently authenticated user."""
-    return UUID(payload["sub"])
-
-
-async def get_optional_user_id(
-    token: str | None = Depends(_extract_token),
-) -> UUID | None:
-    """Return user UUID if a valid token is present, None otherwise."""
-    if not token:
-        return None
-    payload = decode_token(token)
-    if not payload or payload.get("type") != "access":
-        return None
-    return UUID(payload["sub"])
-
-
-def get_pagination(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-) -> dict[str, int]:
-    """Return pagination parameters as a dict."""
-    return {"limit": limit, "offset": offset}
+__all__ = [
+    "ACCESS_TOKEN_COOKIE_KEY",
+    "get_current_user",
+    "get_current_user_id",
+    "get_optional_user_id",
+    "get_pagination",
+    "oauth2_scheme",
+]

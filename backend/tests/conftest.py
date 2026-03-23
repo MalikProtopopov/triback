@@ -13,7 +13,8 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
@@ -22,6 +23,15 @@ from app.models.users import Role, User, UserRoleAssignment
 from app.tasks import broker as taskiq_broker
 
 TEST_DB_URL = str(settings.DATABASE_URL).rsplit("/", 1)[0] + "/triho_db_test"
+
+# Same set as scripts/create_admin.py — app code expects these rows (e.g. create_doctor).
+_TEST_ROLES_SEED: list[tuple[str, str]] = [
+    ("admin", "Администратор"),
+    ("manager", "Менеджер"),
+    ("accountant", "Бухгалтер"),
+    ("doctor", "Врач"),
+    ("user", "Пользователь"),
+]
 
 
 # ── One-time schema setup (runs outside the test event loop) ──────
@@ -34,7 +44,22 @@ def pytest_configure(config: pytest.Config) -> None:
             await conn.run_sync(Base.metadata.create_all)
         await eng.dispose()
 
+    async def _seed_roles() -> None:
+        """Committed baseline roles so per-test transactions see them (create_doctor, etc.)."""
+        eng = create_async_engine(TEST_DB_URL, echo=False)
+        factory = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as session:
+            for name, title in _TEST_ROLES_SEED:
+                existing = (
+                    await session.execute(select(Role).where(Role.name == name))
+                ).scalar_one_or_none()
+                if existing is None:
+                    session.add(Role(name=name, title=title))
+            await session.commit()
+        await eng.dispose()
+
     asyncio.run(_create())
+    asyncio.run(_seed_roles())
 
 
 # ── Disable TaskIQ broker in tests (no-op kiq) ───────────────────
@@ -62,6 +87,14 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         await txn.rollback()
         await conn.close()
         await engine.dispose()
+
+
+@pytest.fixture(name="async_session")
+async def async_session_alias(
+    db_session: AsyncSession,
+) -> AsyncGenerator[AsyncSession, None]:
+    """Alias for ``db_session`` (per-test rollback semantics)."""
+    yield db_session
 
 
 # ── Redis mock ────────────────────────────────────────────────────
@@ -92,12 +125,20 @@ def redis_mock() -> AsyncMock:
     async def _expire(key: str, ttl: int) -> None:
         pass
 
+    async def _scan_iter(match: str = "*"):  # noqa: ANN001
+        import fnmatch
+
+        for k in list(_store.keys()):
+            if fnmatch.fnmatch(k, match):
+                yield k
+
     r.get = AsyncMock(side_effect=_get)
     r.set = AsyncMock(side_effect=_set)
     r.delete = AsyncMock(side_effect=_delete)
     r.incr = AsyncMock(side_effect=_incr)
     r.expire = AsyncMock(side_effect=_expire)
     r.ping = AsyncMock(return_value=True)
+    r.scan_iter = _scan_iter
     return r
 
 
@@ -142,9 +183,13 @@ async def _create_user_with_role(
     db.add(user)
     await db.flush()
 
-    role = Role(name=role_name, title=role_name.capitalize())
-    db.add(role)
-    await db.flush()
+    role = (
+        await db.execute(select(Role).where(Role.name == role_name))
+    ).scalar_one_or_none()
+    if role is None:
+        role = Role(name=role_name, title=role_name.capitalize())
+        db.add(role)
+        await db.flush()
 
     assignment = UserRoleAssignment(user_id=user.id, role_id=role.id)
     db.add(assignment)
@@ -193,3 +238,15 @@ def auth_headers_admin(admin_user: User) -> dict[str, str]:
 @pytest.fixture
 def auth_headers_accountant(accountant_user: User) -> dict[str, str]:
     return _make_auth_headers(accountant_user.id, "accountant")
+
+
+@pytest.fixture
+def user_factory(db_session: AsyncSession):
+    """Create a user with any seeded role (``admin``, ``doctor``, ``user``, …)."""
+
+    async def _make(*, role: str = "user", email: str | None = None) -> User:
+        return await _create_user_with_role(
+            db_session, email or f"u_{uuid4().hex[:8]}@test.com", role
+        )
+
+    return _make

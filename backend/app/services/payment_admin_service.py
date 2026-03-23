@@ -206,7 +206,7 @@ class PaymentAdminService:
                 f"Текущий статус: '{payment.status}'"
             )
 
-        payment.status = PaymentStatus.FAILED  # type: ignore[assignment]
+        payment.status = PaymentStatus.FAILED
         payment.description = (
             f"{payment.description or ''} | Отменён администратором: {reason}"
         ).strip(" |")
@@ -215,12 +215,12 @@ class PaymentAdminService:
         cancelled_event_registration = False
 
         if payment.subscription_id:
-            from app.models.subscriptions import Subscription
             from app.core.enums import SubscriptionStatus
+            from app.models.subscriptions import Subscription
 
             sub = await self.db.get(Subscription, payment.subscription_id)
             if sub and sub.status == SubscriptionStatus.PENDING_PAYMENT:
-                sub.status = SubscriptionStatus.CANCELLED  # type: ignore[assignment]
+                sub.status = SubscriptionStatus.CANCELLED
                 cancelled_subscription = True
 
         if payment.event_registration_id:
@@ -283,7 +283,7 @@ class PaymentAdminService:
             raise AppValidationError(
                 "Возвраты через текущий платёжный провайдер не поддерживаются автоматически. "
                 "Используйте ЛК провайдера для оформления возврата."
-            )
+            ) from None
 
         logger.info(
             "refund_initiated",

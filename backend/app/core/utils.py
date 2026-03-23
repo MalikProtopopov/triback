@@ -49,7 +49,7 @@ async def generate_unique_slug(
     pk = model.id
 
     while True:
-        q = select(model.id).where(col == candidate)  # type: ignore[arg-type]
+        q = select(model.id).where(col == candidate)
         if existing_id is not None:
             q = q.where(pk != existing_id)
         result = await db.execute(q)

@@ -43,7 +43,7 @@ class DoctorModerationService:
         dp = await self._get_profile_or_404(profile_id)
 
         new_status = DoctorStatus.APPROVED if action == ModerationAction.APPROVE else DoctorStatus.REJECTED
-        dp.status = new_status  # type: ignore[assignment]
+        dp.status = new_status
 
         if action == "approve" and not dp.slug:
             dp.slug = await generate_unique_slug(
@@ -116,12 +116,12 @@ class DoctorModerationService:
             for key, value in draft.changes.items():
                 if hasattr(dp, key):
                     setattr(dp, key, value)
-            draft.status = ChangeStatus.APPROVED  # type: ignore[assignment]
+            draft.status = ChangeStatus.APPROVED
             draft.reviewed_at = now
             draft.reviewed_by = admin_id
             msg = "Changes approved and applied"
         else:
-            draft.status = ChangeStatus.REJECTED  # type: ignore[assignment]
+            draft.status = ChangeStatus.REJECTED
             draft.reviewed_at = now
             draft.reviewed_by = admin_id
             draft.rejection_reason = rejection_reason
@@ -155,9 +155,9 @@ class DoctorModerationService:
         dp = await self._get_profile_or_404(profile_id)
 
         if is_public:
-            dp.status = DoctorStatus.ACTIVE  # type: ignore[assignment]
+            dp.status = DoctorStatus.ACTIVE
         else:
-            dp.status = DoctorStatus.DEACTIVATED  # type: ignore[assignment]
+            dp.status = DoctorStatus.DEACTIVATED
 
         self.db.add(
             ModerationHistory(

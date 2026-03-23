@@ -33,7 +33,7 @@ class PaymentUserService:
         limit: int = 20,
         offset: int = 0,
     ) -> dict[str, Any]:
-        from app.schemas.subscriptions import UserPaymentListItem, _STATUS_LABELS
+        from app.schemas.subscriptions import _STATUS_LABELS, UserPaymentListItem
 
         base = select(Payment).where(Payment.user_id == user_id)
         count_q = select(func.count(Payment.id)).where(Payment.user_id == user_id)

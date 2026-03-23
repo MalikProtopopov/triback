@@ -39,7 +39,7 @@ def _has_active_subscription() -> Any:
 
 
 class CityPublicService:
-    def __init__(self, db: AsyncSession, redis: Redis) -> None:  # type: ignore[type-arg]
+    def __init__(self, db: AsyncSession, redis: Redis) -> None:
         self.db = db
         self.redis = redis
 
@@ -47,7 +47,8 @@ class CityPublicService:
         cache_key = f"cache:cities:{with_doctors}"
         cached = await self.redis.get(cache_key)
         if cached:
-            return json.loads(cached)
+            parsed: dict[str, Any] = json.loads(cached)
+            return parsed
 
         if with_doctors:
             items = await self._cities_with_doctors()

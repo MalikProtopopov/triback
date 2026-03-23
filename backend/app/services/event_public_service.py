@@ -13,7 +13,6 @@ from app.core.enums import EventStatus, RecordingStatus
 from app.core.exceptions import NotFoundError
 from app.models.events import Event, EventGallery
 from app.schemas.public import (
-    ContentBlockPublicNested,
     EventPublicDetailResponse,
     EventPublicListItem,
     GalleryPublicNested,
@@ -22,6 +21,7 @@ from app.schemas.public import (
     SeoNested,
     TariffPublicNested,
 )
+from app.schemas.shared import ContentBlockPublicNested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 

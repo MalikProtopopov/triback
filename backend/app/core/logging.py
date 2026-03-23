@@ -1,7 +1,10 @@
 """Structlog configuration for structured JSON logging."""
 
+from __future__ import annotations
+
 import logging
 import sys
+from typing import cast
 
 import structlog
 
@@ -51,4 +54,4 @@ def configure_logging(debug: bool = False) -> None:
 
 def get_logger(name: str = __name__) -> structlog.stdlib.BoundLogger:
     """Return a bound structlog logger."""
-    return structlog.get_logger(name)  # type: ignore[return-value]
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))

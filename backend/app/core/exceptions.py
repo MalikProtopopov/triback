@@ -32,13 +32,19 @@ class ErrorResponse(BaseModel):
 class AppError(HTTPException):
     """Base application error with RFC 7807-inspired body."""
 
-    def __init__(self, status_code: int, code: str, message: str, details: dict | None = None):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ):
         self.error_code = code
         self.error_message = message
         self.error_details = details or {}
         super().__init__(status_code=status_code, detail=message)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "error": {
                 "code": self.error_code,
@@ -49,32 +55,40 @@ class AppError(HTTPException):
 
 
 class NotFoundError(AppError):
-    def __init__(self, message: str = "Resource not found", details: dict | None = None):
+    def __init__(
+        self, message: str = "Resource not found", details: dict[str, Any] | None = None
+    ):
         super().__init__(404, "NOT_FOUND", message, details)
 
 
 class ForbiddenError(AppError):
-    def __init__(self, message: str = "Access forbidden", details: dict | None = None):
+    def __init__(
+        self, message: str = "Access forbidden", details: dict[str, Any] | None = None
+    ):
         super().__init__(403, "FORBIDDEN", message, details)
 
 
 class UnauthorizedError(AppError):
-    def __init__(self, message: str = "Unauthorized", details: dict | None = None):
+    def __init__(self, message: str = "Unauthorized", details: dict[str, Any] | None = None):
         super().__init__(401, "UNAUTHORIZED", message, details)
 
 
 class ConflictError(AppError):
-    def __init__(self, message: str = "Conflict", details: dict | None = None):
+    def __init__(self, message: str = "Conflict", details: dict[str, Any] | None = None):
         super().__init__(409, "CONFLICT", message, details)
 
 
 class AppValidationError(AppError):
-    def __init__(self, message: str = "Validation error", details: dict | None = None):
+    def __init__(
+        self, message: str = "Validation error", details: dict[str, Any] | None = None
+    ):
         super().__init__(422, "VALIDATION_ERROR", message, details)
 
 
 class NotImplementedAppError(AppError):
-    def __init__(self, message: str = "Not implemented", details: dict | None = None):
+    def __init__(
+        self, message: str = "Not implemented", details: dict[str, Any] | None = None
+    ):
         super().__init__(501, "NOT_IMPLEMENTED", message, details)
 
 

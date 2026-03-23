@@ -9,11 +9,13 @@ from app.services.payment_providers.base import (
     RefundResult,
     WebhookData,
 )
+from app.services.payment_providers.protocols import PaymentProviderProtocol
 
 __all__ = [
     "CreatePaymentResult",
     "PaymentItem",
     "PaymentProvider",
+    "PaymentProviderProtocol",
     "RefundResult",
     "WebhookData",
     "get_provider",

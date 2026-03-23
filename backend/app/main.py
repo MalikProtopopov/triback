@@ -1,8 +1,11 @@
 """FastAPI application entry point."""
 
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +20,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.rate_limit import limiter
 from app.core.redis import check_redis_connection, get_redis
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.tasks import broker
 
 logger = get_logger(__name__)
@@ -43,6 +47,53 @@ def _validate_production_config() -> None:
             raise RuntimeError(
                 f"JWT key file not found: {path}. "
                 "Generate keys or set {key_attr} before running in production."
+            )
+    db_url = str(settings.DATABASE_URL)
+    is_test_db = "triho_db_test" in db_url
+    if "triho_pass@" in db_url and not is_test_db:
+        raise RuntimeError(
+            "DATABASE_URL appears to use the default dev password (triho_pass). "
+            "Set a strong password via environment before production."
+        )
+    if not is_test_db:
+        prov = (settings.PAYMENT_PROVIDER or "").lower()
+        # YooKassa: only when explicitly selected (primary stack for this project is Moneta).
+        if prov == "yookassa":
+            if not (settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY):
+                raise RuntimeError(
+                    "YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY are required when PAYMENT_PROVIDER=yookassa."
+                )
+            if not (settings.YOOKASSA_IP_WHITELIST or "").strip():
+                raise RuntimeError(
+                    "YOOKASSA_IP_WHITELIST must be non-empty in production when using YooKassa."
+                )
+            if not settings.YOOKASSA_WEBHOOK_VERIFY_WITH_API:
+                raise RuntimeError(
+                    "YOOKASSA_WEBHOOK_VERIFY_WITH_API must be true in production when PAYMENT_PROVIDER=yookassa "
+                    "(server-side confirmation of webhook payloads via YooKassa API)."
+                )
+        if prov == "moneta":
+            if not (settings.MONETA_WEBHOOK_SECRET or "").strip():
+                raise RuntimeError(
+                    "MONETA_WEBHOOK_SECRET must be set in production when PAYMENT_PROVIDER=moneta "
+                    "(код проверки целостности в ЛК Moneta / Pay URL)."
+                )
+            for attr, hint in (
+                ("MONETA_USERNAME", "логин MerchantAPI v2"),
+                ("MONETA_PASSWORD", "пароль MerchantAPI v2"),
+                ("MONETA_PAYEE_ACCOUNT", "расширенный номер счёта получателя (InvoiceRequest payee)"),
+                ("MONETA_MNT_ID", "MNT_ID платёжной формы Assistant"),
+            ):
+                if not str(getattr(settings, attr, "") or "").strip():
+                    raise RuntimeError(
+                        f"{attr} must be non-empty in production when PAYMENT_PROVIDER=moneta ({hint})."
+                    )
+        if (settings.TELEGRAM_BOT_TOKEN or "").strip() and not (
+            settings.TELEGRAM_WEBHOOK_SECRET or ""
+        ).strip():
+            raise RuntimeError(
+                "TELEGRAM_WEBHOOK_SECRET is required in production when TELEGRAM_BOT_TOKEN is set "
+                "(legacy /telegram/webhook path)."
             )
 
 
@@ -74,7 +125,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await broker.shutdown()
 
 
-def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Starlette types handlers as (Request, Exception); runtime is RateLimitExceeded."""
+    assert isinstance(exc, RateLimitExceeded)
     return JSONResponse(
         status_code=429,
         content={"error": {"code": "RATE_LIMITED", "message": "Too many requests", "details": {}}},
@@ -222,19 +275,20 @@ def create_app() -> FastAPI:
     )
 
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(RequestValidationError, _validation_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+    app.add_exception_handler(RequestValidationError, _validation_error_handler)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.ALLOWED_HOSTS,
+        allow_origins=settings.CORS_ALLOWED_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(SecurityHeadersMiddleware)
 
     register_exception_handlers(app)
-    app.add_exception_handler(Exception, _unhandled_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, _unhandled_exception_handler)
 
     from app.api.v1 import router as api_v1_router
 
@@ -248,7 +302,7 @@ app = create_app()
 
 # Health check endpoint — always available
 @app.get("/api/v1/health", tags=["System"])
-async def health_check() -> dict:
+async def health_check() -> dict[str, Any]:
     """Return service health status including DB and Redis availability."""
     db_ok = await check_db_connection()
     redis_ok = await check_redis_connection()
@@ -275,7 +329,7 @@ _SITEMAP_CACHE_TTL = 3600
 @app.get("/sitemap.xml", include_in_schema=False)
 async def sitemap_xml(
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> Response:
     cache_key = "cache:sitemap_xml"
     cached = await redis.get(cache_key)

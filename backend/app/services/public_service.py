@@ -24,7 +24,7 @@ from app.services.event_public_service import EventPublicService
 class PublicService:
     """Thin facade — preserves the original API so any existing callers keep working."""
 
-    def __init__(self, db: AsyncSession, redis: Redis) -> None:  # type: ignore[type-arg]
+    def __init__(self, db: AsyncSession, redis: Redis) -> None:
         self.db = db
         self.redis = redis
         self._cities = CityPublicService(db, redis)

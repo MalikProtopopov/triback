@@ -1,5 +1,6 @@
 """Profile service — personal/public profile management, photo upload, draft moderation."""
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -33,7 +34,7 @@ class ProfileService:
             raise NotFoundError("Doctor profile not found")
         return profile
 
-    async def update_personal(self, user_id: UUID, data: dict) -> None:
+    async def update_personal(self, user_id: UUID, data: dict[str, Any]) -> None:
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == user_id)
         )
@@ -70,7 +71,7 @@ class ProfileService:
     # Public profile (moderated changes via doctor_profile_changes)
     # ------------------------------------------------------------------
 
-    async def get_public(self, user_id: UUID) -> dict:
+    async def get_public(self, user_id: UUID) -> dict[str, Any]:
         result = await self.db.execute(
             select(DoctorProfile)
             .options(selectinload(DoctorProfile.city))
@@ -130,7 +131,7 @@ class ProfileService:
             "pending_draft": draft_data,
         }
 
-    async def update_public(self, user_id: UUID, data: dict) -> None:
+    async def update_public(self, user_id: UUID, data: dict[str, Any]) -> None:
         """Create a pending change request. Raises ConflictError if one already exists."""
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == user_id)
@@ -178,7 +179,7 @@ class ProfileService:
     # Photo upload with resize
     # ------------------------------------------------------------------
 
-    async def upload_photo(self, user_id: UUID, upload: UploadFile) -> dict:
+    async def upload_photo(self, user_id: UUID, upload: UploadFile) -> dict[str, Any]:
         """Upload photo to S3 and create/merge a pending draft for moderation."""
         result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == user_id)

@@ -48,7 +48,7 @@ async def _require_active_subscription(db: AsyncSession, user_id: UUID) -> None:
 )
 async def list_colleagues(
     db: AsyncSession = Depends(get_db_session),
-    payload: dict = DOCTOR,
+    payload: dict[str, Any] = DOCTOR,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     search: str | None = Query(None, min_length=2, max_length=100),

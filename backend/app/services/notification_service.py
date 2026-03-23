@@ -81,11 +81,11 @@ class NotificationService:
                 if binding and binding.tg_chat_id:
                     await self.send_telegram(binding.tg_chat_id, body)
 
-            notif.status = "sent"  # type: ignore[assignment]
+            notif.status = "sent"
             notif.sent_at = datetime.now(UTC)
         except Exception:
             logger.exception("notification_dispatch_failed", notif_id=str(notif.id))
-            notif.status = NotificationStatus.FAILED  # type: ignore[assignment]
+            notif.status = NotificationStatus.FAILED
 
         await self.db.commit()
         return notif

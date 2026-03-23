@@ -12,9 +12,9 @@ from app.core.openapi import error_responses
 from app.core.redis import get_redis
 from app.core.security import require_role
 from app.schemas.subscriptions import (
+    PaymentStatusResponse,
     PayRequest,
     PayResponse,
-    PaymentStatusResponse,
     ReceiptResponse,
     SubscriptionStatusResponse,
     UserPaymentPaginatedResponse,
@@ -37,7 +37,7 @@ async def pay_subscription(
     body: PayRequest,
     payload: dict[str, Any] = DOCTOR,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> PayResponse:
     """Создаёт платёж через текущий платёжный провайдер (Moneta / YooKassa)
     и возвращает URL для оплаты.
@@ -65,7 +65,7 @@ async def pay_subscription(
 async def subscription_status(
     payload: dict[str, Any] = DOCTOR,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> SubscriptionStatusResponse:
     """Текущий статус подписки: есть ли подписка, когда истекает,
     оплачен ли вступительный взнос, доступно ли продление.
@@ -87,10 +87,10 @@ async def subscription_status(
 async def list_my_payments(
     payload: dict[str, Any] = DOCTOR,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-) -> dict:
+) -> dict[str, Any]:
     """Пагинированный список платежей текущего пользователя.
 
     - **401** — не авторизован
@@ -110,7 +110,7 @@ async def list_my_payments(
 async def get_payment_status(
     payment_id: UUID,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> PaymentStatusResponse:
     """Возвращает статус платежа по ID. Публичный endpoint — без авторизации.
 
@@ -132,8 +132,8 @@ async def check_payment_status(
     payment_id: UUID,
     payload: dict[str, Any] = DOCTOR,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-) -> dict:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     """Проверяет статус платежа напрямую через Moneta API.
 
     Используется как fallback когда Pay URL webhook не доставлен.
@@ -161,8 +161,8 @@ async def get_payment_receipt(
     payment_id: UUID,
     payload: dict[str, Any] = DOCTOR,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
-) -> dict:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     """Возвращает данные чека (фискализации) по платежу.
 
     - **401** — не авторизован

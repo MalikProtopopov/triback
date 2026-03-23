@@ -33,7 +33,7 @@ async def test_register_for_event_authenticated(
         payment_url="https://moneta.test/pay/evt",
     )
 
-    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+    with patch("app.services.event_registration.service.get_provider") as mock_gp:
         mock_provider = AsyncMock()
         mock_provider.create_payment = AsyncMock(return_value=mock_result)
         mock_gp.return_value = mock_provider
@@ -74,7 +74,7 @@ async def test_register_with_x_access_token_header(
         payment_url="https://moneta.test/pay/xt",
     )
 
-    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+    with patch("app.services.event_registration.service.get_provider") as mock_gp:
         mock_provider = AsyncMock()
         mock_provider.create_payment = AsyncMock(return_value=mock_result)
         mock_gp.return_value = mock_provider
@@ -113,7 +113,7 @@ async def test_register_with_access_token_cookie(
         payment_url="https://moneta.test/pay/ck",
     )
 
-    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+    with patch("app.services.event_registration.service.get_provider") as mock_gp:
         mock_provider = AsyncMock()
         mock_provider.create_payment = AsyncMock(return_value=mock_result)
         mock_gp.return_value = mock_provider
@@ -158,7 +158,7 @@ async def test_register_member_gets_discount(
         payment_url="https://moneta.test/pay/mbr",
     )
 
-    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+    with patch("app.services.event_registration.service.get_provider") as mock_gp:
         mock_provider = AsyncMock()
         mock_provider.create_payment = AsyncMock(return_value=mock_result)
         mock_gp.return_value = mock_provider
@@ -303,7 +303,7 @@ async def test_confirm_guest_registration_success(
     )
 
     with (
-        patch("app.services.event_registration_service.get_provider") as mock_gp,
+        patch("app.services.event_registration.service.get_provider") as mock_gp,
         patch(
             "app.tasks.email_tasks.send_guest_account_created",
         ) as mock_email,
@@ -606,7 +606,7 @@ async def test_register_after_cancelled_reuses_registration(
         payment_url="https://moneta.test/pay/reuse1",
     )
 
-    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+    with patch("app.services.event_registration.service.get_provider") as mock_gp:
         mock_provider = AsyncMock()
         mock_provider.create_payment = AsyncMock(return_value=mock_result)
         mock_gp.return_value = mock_provider
@@ -637,7 +637,7 @@ async def test_register_after_cancelled_reuses_registration(
         payment_url="https://moneta.test/pay/reuse2",
     )
 
-    with patch("app.services.event_registration_service.get_provider") as mock_gp:
+    with patch("app.services.event_registration.service.get_provider") as mock_gp:
         mock_provider = AsyncMock()
         mock_provider.create_payment = AsyncMock(return_value=mock_result2)
         mock_gp.return_value = mock_provider

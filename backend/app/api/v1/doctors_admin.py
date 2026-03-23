@@ -267,7 +267,7 @@ async def import_doctors(
     file: UploadFile,
     payload: dict[str, Any] = ADMIN_ONLY,
     db: AsyncSession = Depends(get_db_session),
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    redis: Redis = Depends(get_redis),
 ) -> ImportStartResponse:
     """Запускает фоновый импорт врачей из Excel-файла.
     Статус импорта можно отслеживать через `GET /admin/doctors/import/{task_id}`.
@@ -290,13 +290,14 @@ async def import_doctors(
 async def get_import_status(
     task_id: str,
     payload: dict[str, Any] = ADMIN_ONLY,
-    redis: Redis = Depends(get_redis),  # type: ignore[type-arg]
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
 ) -> ImportStatusResponse:
     """Проверяет статус фонового импорта.
 
     - **404** — задача не найдена
     """
-    svc = DoctorAdminService(db=None)  # type: ignore[arg-type]
+    svc = DoctorAdminService(db)
     return await svc.get_import_status(task_id, redis)
 
 

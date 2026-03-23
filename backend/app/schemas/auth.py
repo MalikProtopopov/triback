@@ -1,5 +1,7 @@
 """Pydantic schemas for authentication endpoints."""
 
+from typing import Self
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
@@ -9,7 +11,7 @@ class RegisterRequest(BaseModel):
     re_password: str = Field(min_length=8)
 
     @model_validator(mode="after")
-    def passwords_match(self) -> "RegisterRequest":
+    def passwords_match(self) -> Self:
         if self.password != self.re_password:
             raise ValueError("Passwords do not match")
         return self

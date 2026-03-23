@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import html
+
 import structlog
 
 from app.core.config import settings
+from app.core.logging_privacy import mask_email_for_log
 from app.services.email_sender import send_smtp_email
 from app.tasks import broker
 
@@ -67,7 +69,7 @@ def _button(url: str, label: str) -> str:
     )
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_verification_email(email: str, token: str) -> None:
     url = f"{_BASE_URL}/auth/verify-email?token={token}"
     body = _wrap_html(
@@ -80,12 +82,15 @@ async def send_verification_email(email: str, token: str) -> None:
     await send_smtp_email(email, f"Подтверждение email — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_password_reset_email(email: str, token: str, is_staff: bool = False) -> None:
     if is_staff and settings.ADMIN_FRONTEND_URL:
         base = settings.ADMIN_FRONTEND_URL.rstrip("/")
     elif is_staff:
-        logger.warning("ADMIN_FRONTEND_URL not set, sending staff password reset to FRONTEND_URL", email=email)
+        logger.warning(
+            "ADMIN_FRONTEND_URL not set, sending staff password reset to FRONTEND_URL",
+            email_masked=mask_email_for_log(email),
+        )
         base = _BASE_URL
     else:
         base = _BASE_URL
@@ -101,7 +106,7 @@ async def send_password_reset_email(email: str, token: str, is_staff: bool = Fal
     await send_smtp_email(email, f"Сброс пароля — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_email_change_confirmation(email: str, token: str) -> None:
     url = f"{_BASE_URL}/auth/confirm-email?token={token}"
     body = _wrap_html(
@@ -114,7 +119,7 @@ async def send_email_change_confirmation(email: str, token: str) -> None:
     await send_smtp_email(email, f"Подтверждение нового email — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_moderation_result_notification(
     email: str,
     status: str,
@@ -155,7 +160,7 @@ async def send_moderation_result_notification(
     await send_smtp_email(email, f"{title} — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_draft_result_notification(
     email: str, status: str, rejection_reason: str | None = None
 ) -> None:
@@ -176,7 +181,7 @@ async def send_draft_result_notification(
     await send_smtp_email(email, f"{title} — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_reminder_notification(email: str, message: str | None = None) -> None:
     text = _esc(message) if message else "Ваша подписка скоро истекает. Не забудьте продлить членство."
     body = _wrap_html(
@@ -187,7 +192,7 @@ async def send_reminder_notification(email: str, message: str | None = None) -> 
     await send_smtp_email(email, f"Напоминание — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_custom_email(email: str, subject: str, body_text: str) -> None:
     wrapped = _wrap_html(
         f"<div style='color:#5F6B7A;line-height:1.6;'>{html.escape(body_text)}</div>"
@@ -195,7 +200,7 @@ async def send_custom_email(email: str, subject: str, body_text: str) -> None:
     await send_smtp_email(email, subject, wrapped)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_payment_succeeded_notification(
     email: str, amount: float, product_type: str, receipt_url: str | None = None
 ) -> None:
@@ -214,7 +219,7 @@ async def send_payment_succeeded_notification(
     await send_smtp_email(email, f"Оплата подтверждена — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_payment_failed_notification(email: str) -> None:
     body = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1A1D23;font-family:\"Plus Jakarta Sans\",Arial,sans-serif;'>Ошибка оплаты</h2>"
@@ -225,7 +230,7 @@ async def send_payment_failed_notification(email: str) -> None:
     await send_smtp_email(email, f"Ошибка оплаты — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_event_verification_code(
     email: str, code: str, event_title: str
 ) -> None:
@@ -241,7 +246,7 @@ async def send_event_verification_code(
     await send_smtp_email(email, f"Код подтверждения — {_esc(event_title)}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_doctor_invite_email(
     email: str, temp_password: str, frontend_url: str
 ) -> None:
@@ -260,13 +265,16 @@ async def send_doctor_invite_email(
     await send_smtp_email(email, f"Ваш аккаунт врача — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_receipt_available_notification(
     email: str, receipt_url: str, amount: float
 ) -> None:
     safe_url = _safe_url(receipt_url)
     if not safe_url:
-        logger.warning("receipt_url_invalid_or_empty", email=email)
+        logger.warning(
+            "receipt_url_invalid_or_empty",
+            email_masked=mask_email_for_log(email),
+        )
         return
     body = _wrap_html(
         f"<h2 style='margin:0 0 16px;color:#1A1D23;font-family:\"Plus Jakarta Sans\",Arial,sans-serif;'>Ваш чек готов</h2>"
@@ -278,7 +286,7 @@ async def send_receipt_available_notification(
     await send_smtp_email(email, f"Ваш чек — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_guest_account_created(
     email: str, temp_password: str, event_title: str, frontend_url: str
 ) -> None:
@@ -300,7 +308,7 @@ async def send_guest_account_created(
     await send_smtp_email(email, f"Ваш аккаунт — {_BRAND}", body)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_event_ticket_purchased(
     email: str,
     event_title: str,

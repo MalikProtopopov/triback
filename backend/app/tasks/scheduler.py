@@ -5,8 +5,12 @@ and also run automatically via ``start_scheduler()`` which launches asyncio
 background loops during application lifespan.
 """
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from sqlalchemy import and_, or_, select
@@ -15,10 +19,14 @@ from app.tasks import broker
 
 logger = structlog.get_logger(__name__)
 
-_scheduler_tasks: list[asyncio.Task] = []  # type: ignore[type-arg]
+_scheduler_tasks: list[asyncio.Task[None]] = []
 
 
-async def _run_periodic(name: str, coro_fn, interval_seconds: int) -> None:  # noqa: ANN001
+async def _run_periodic(
+    name: str,
+    coro_fn: Callable[[], Awaitable[Any]],
+    interval_seconds: int,
+) -> None:
     """Run *coro_fn* every *interval_seconds*, catching exceptions."""
     while True:
         try:
@@ -93,7 +101,7 @@ async def stop_scheduler() -> None:
     logger.info("scheduler_stopped")
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def check_expiring_subscriptions() -> int:
     """Daily: send email reminders for subscriptions expiring in 30/7/3/1 days.
 
@@ -111,7 +119,7 @@ async def check_expiring_subscriptions() -> int:
         return count
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def deactivate_expired_subscriptions() -> int:
     """Hourly: mark expired subscriptions and remove Telegram channel access.
 
@@ -137,11 +145,12 @@ async def deactivate_expired_subscriptions() -> int:
         )
         expired_subs = result.scalars().all()
 
+        from app.core.enums import SubscriptionStatus
         from app.models.certificates import Certificate
 
         expired_user_ids = []
         for sub in expired_subs:
-            sub.status = "expired"  # type: ignore[assignment]
+            sub.status = SubscriptionStatus.EXPIRED
             deactivated += 1
             expired_user_ids.append(sub.user_id)
 
@@ -177,10 +186,11 @@ async def deactivate_expired_subscriptions() -> int:
     return deactivated
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def close_expired_voting_sessions() -> int:
     """Hourly: set status=closed for active voting sessions where ends_at < now."""
     from app.core.database import AsyncSessionLocal
+    from app.core.enums import VotingSessionStatus
     from app.models.voting import VotingSession
 
     now = datetime.now(UTC)
@@ -198,7 +208,7 @@ async def close_expired_voting_sessions() -> int:
         expired_sessions = result.scalars().all()
 
         for session in expired_sessions:
-            session.status = "closed"  # type: ignore[assignment]
+            session.status = VotingSessionStatus.CLOSED
             closed += 1
 
         await db.commit()
@@ -207,7 +217,7 @@ async def close_expired_voting_sessions() -> int:
     return closed
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def poll_pending_moneta_payments() -> int:
     """Every 30s: check pending Moneta payments via API and confirm if paid.
 
@@ -216,6 +226,7 @@ async def poll_pending_moneta_payments() -> int:
     """
     from app.core.config import settings
     from app.core.database import AsyncSessionLocal
+    from app.core.enums import PaymentStatus, SubscriptionStatus
     from app.models.subscriptions import Payment
     from app.services.payment_webhook_service import PaymentWebhookService
 
@@ -252,9 +263,10 @@ async def poll_pending_moneta_payments() -> int:
 
         for payment in pending:
             try:
-                op_info = await provider.get_operation_status(
-                    payment.moneta_operation_id
-                )
+                op_id = payment.moneta_operation_id
+                if not op_id:
+                    continue
+                op_info = await provider.get_operation_status(op_id)
             except Exception as exc:
                 logger.warning(
                     "poll_moneta_error",
@@ -282,7 +294,7 @@ async def poll_pending_moneta_payments() -> int:
                     payment_id=str(payment.id),
                     moneta_status=moneta_status,
                 )
-                payment.status = "failed"  # type: ignore[assignment]
+                payment.status = PaymentStatus.FAILED
                 payment.description = (
                     f"{payment.description or ''} | Отменено Moneta: {moneta_status}"
                 ).strip(" |")
@@ -290,15 +302,15 @@ async def poll_pending_moneta_payments() -> int:
 
                 if payment.subscription_id:
                     sub = await db.get(Subscription, payment.subscription_id)
-                    if sub and sub.status == "pending_payment":
-                        sub.status = "cancelled"  # type: ignore[assignment]
+                    if sub and sub.status == SubscriptionStatus.PENDING_PAYMENT:
+                        sub.status = SubscriptionStatus.CANCELLED
                 await db.commit()
 
     logger.info("poll_pending_moneta_done", checked=len(pending), confirmed=confirmed)
     return confirmed
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def expire_stale_pending_payments() -> int:
     """Every 30 min: mark pending payments past their expires_at as expired.
 
@@ -311,6 +323,7 @@ async def expire_stale_pending_payments() -> int:
     """
     from app.core.config import settings
     from app.core.database import AsyncSessionLocal
+    from app.core.enums import PaymentStatus, SubscriptionStatus
     from app.models.subscriptions import Payment, Subscription
     from app.services.payment_webhook_service import PaymentWebhookService
 
@@ -334,13 +347,13 @@ async def expire_stale_pending_payments() -> int:
 
         webhook_svc = PaymentWebhookService(db)
         for payment in stale_payments:
-            payment.status = "expired"  # type: ignore[assignment]
+            payment.status = PaymentStatus.EXPIRED
             expired_count += 1
 
             if payment.subscription_id:
                 sub = await db.get(Subscription, payment.subscription_id)
-                if sub and sub.status == "pending_payment":
-                    sub.status = "cancelled"  # type: ignore[assignment]
+                if sub and sub.status == SubscriptionStatus.PENDING_PAYMENT:
+                    sub.status = SubscriptionStatus.CANCELLED
 
             if payment.event_registration_id:
                 await webhook_svc._cancel_event_registration(payment)
@@ -351,7 +364,7 @@ async def expire_stale_pending_payments() -> int:
     return expired_count
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def send_admin_expiring_subscriptions_report() -> int:
     """Daily: send admin a Telegram report of subscriptions expiring in the next 7 days.
 
@@ -384,14 +397,13 @@ async def send_admin_expiring_subscriptions_report() -> int:
 
     lines = ["Подписки истекают в ближайшие 7 дней:\n"]
     for sub, user in rows:
-        dp_result = None
         full_name = user.email
         # Try to get full name from doctor profile
         try:
-            from app.core.database import AsyncSessionLocal as _ASL
+            from app.core.database import AsyncSessionLocal
             from app.models.profiles import DoctorProfile
 
-            async with _ASL() as db2:
+            async with AsyncSessionLocal() as db2:
                 dp = (
                     await db2.execute(
                         select(DoctorProfile).where(DoctorProfile.user_id == user.id)
@@ -421,7 +433,7 @@ async def send_admin_expiring_subscriptions_report() -> int:
     return len(rows)
 
 
-@broker.task  # type: ignore[misc]
+@broker.task
 async def deactivate_expired_certificates() -> int:
     """Daily: deactivate member certificates whose owners have no active subscription.
 

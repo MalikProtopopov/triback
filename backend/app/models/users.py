@@ -1,6 +1,7 @@
 """User-related models: users, user_roles, telegram_bindings, notifications, notification_templates."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -129,7 +130,7 @@ class Notification(Base, UUIDMixin):
     channel: Mapped[str] = mapped_column(NotificationChannel, nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[dict | None] = mapped_column(JSONB)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(
         NotificationStatus, server_default="pending", nullable=False
     )

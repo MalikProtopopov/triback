@@ -1,6 +1,7 @@
 """Subscription and payment models: plans, subscriptions, payments, receipts."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -162,7 +163,7 @@ class Receipt(Base, UUIDMixin, TimestampMixin):
     fiscal_document: Mapped[str | None] = mapped_column(String(100))
     fiscal_sign: Mapped[str | None] = mapped_column(String(100))
     receipt_url: Mapped[str | None] = mapped_column(String(1000))
-    receipt_data: Mapped[dict | None] = mapped_column(JSONB)
+    receipt_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     status: Mapped[str] = mapped_column(
         ReceiptStatus, server_default="pending", nullable=False

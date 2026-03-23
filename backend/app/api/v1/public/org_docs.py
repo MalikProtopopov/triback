@@ -1,5 +1,7 @@
 """Public organization document endpoints."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,11 +10,8 @@ from app.core.database import get_db_session
 from app.core.exceptions import NotFoundError
 from app.core.openapi import error_responses
 from app.models.content import ContentBlock, OrganizationDocument
-from app.schemas.public import (
-    ContentBlockPublicNested,
-    OrgDocPublicDetailResponse,
-    OrgDocPublicListResponse,
-)
+from app.schemas.public import OrgDocPublicDetailResponse, OrgDocPublicListResponse
+from app.schemas.shared import ContentBlockPublicNested
 from app.services import file_service
 
 router = APIRouter()
@@ -25,7 +24,7 @@ router = APIRouter()
 )
 async def list_organization_documents(
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Список активных документов организации (устав, положения и т.д.)."""
     result = await db.execute(
         select(OrganizationDocument)

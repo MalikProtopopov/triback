@@ -6,6 +6,39 @@
 
 ---
 
+## Check URL (предвалидация заказа)
+
+Эндпоинт: `GET|POST /api/v1/webhooks/moneta/check`
+
+Moneta вызывает его **до** оплаты. Ответ — XML; бизнес-код в поле `MNT_RESULT_CODE` (HTTP у ответа всегда 200 OK).
+
+| `MNT_RESULT_CODE` | Когда |
+|-------------------|--------|
+| **200** | Платёж в БД найден и доступен для оплаты (`pending` — в теле при необходимости передаётся `MNT_AMOUNT`) или уже оплачен (`succeeded`). |
+| **402** | Заказ не найден (неверный UUID в `MNT_TRANSACTION_ID`) или недоступен для оплаты (например `failed`, `expired`, возврат). |
+| **500** | Неверная `MNT_SIGNATURE`; либо в запросе указана `MNT_AMOUNT`, не совпадающая с суммой платежа в БД. |
+
+Реализация: [`webhooks.py`](../backend/app/api/v1/webhooks.py) (`moneta_check_webhook`).
+
+---
+
+## Receipt webhook (фискальный чек, 54-ФЗ)
+
+Эндпоинт: `POST /api/v1/webhooks/moneta/receipt` (JSON: `operation`, `receipt`).
+
+В **production** без настроек аутентификации бэкенд отвечает **403** — запрос не обрабатывается.
+
+| Переменная | Назначение |
+|------------|------------|
+| `MONETA_RECEIPT_WEBHOOK_SECRET` | Общий секрет; в каждом запросе заголовок **`X-Moneta-Receipt-Secret`** с тем же значением (рекомендуемый способ). |
+| `MONETA_RECEIPT_IP_ALLOWLIST` | Список CIDR через запятую (как `YOOKASSA_IP_WHITELIST`): если IP клиента попадает в сеть — запрос допускается без заголовка. |
+
+В режиме **`DEBUG=true`** при пустом секрете и пустом allowlist запросы **допускаются** с предупреждением в логах (`moneta_receipt_webhook_unauthenticated_debug`) — только для локальной разработки.
+
+Реализация: [`payment_utils.py`](../backend/app/services/payment_utils.py) (`is_moneta_receipt_webhook_authorized`), [`webhooks.py`](../backend/app/api/v1/webhooks.py) (`moneta_receipt_webhook`).
+
+---
+
 ## Чек-лист от менеджера Moneta
 
 ### 1. Pay URL без переадресаций

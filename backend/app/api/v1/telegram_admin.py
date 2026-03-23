@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db_session
 from app.core.openapi import error_responses
 from app.core.security import require_role
+from app.models.telegram_integration import TelegramIntegration
 from app.schemas.telegram_admin import (
     TelegramIntegrationCreateRequest,
     TelegramIntegrationResponse,
@@ -20,7 +21,9 @@ router = APIRouter(prefix="/admin")
 ADMIN_MANAGER = require_role("admin", "manager")
 
 
-def _to_response_with_svc(row, svc: TelegramIntegrationService) -> TelegramIntegrationResponse:
+def _to_response_with_svc(
+    row: TelegramIntegration, svc: TelegramIntegrationService
+) -> TelegramIntegrationResponse:
     masked = None
     if row.bot_token_encrypted:
         token = svc._decrypt_token(row)

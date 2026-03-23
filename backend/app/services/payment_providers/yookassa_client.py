@@ -17,6 +17,7 @@ from app.services.payment_providers.base import (
     RefundResult,
     WebhookData,
 )
+from app.services.payment_providers.receipt_items import yookassa_receipt_items
 
 logger = structlog.get_logger(__name__)
 
@@ -46,17 +47,7 @@ class YooKassaPaymentProvider(PaymentProvider):
         idempotency_key: str,
         metadata: dict[str, Any] | None = None,
     ) -> CreatePaymentResult:
-        receipt_items = [
-            {
-                "description": item.name,
-                "quantity": str(item.quantity),
-                "amount": {"value": str(item.price), "currency": "RUB"},
-                "vat_code": item.vat_code or 1,
-                "payment_subject": item.payment_object,
-                "payment_mode": item.payment_method,
-            }
-            for item in items
-        ]
+        receipt_items = yookassa_receipt_items(items)
         receipt = {
             "customer": {"email": customer_email},
             "items": receipt_items,
@@ -168,3 +159,7 @@ class YooKassaPaymentProvider(PaymentProvider):
                 await asyncio.sleep(delay)
 
         raise last_exc or RuntimeError("YooKassa request failed after retries")
+
+    async def get_payment(self, payment_id: str) -> dict[str, Any]:
+        """Fetch payment from YooKassa API (for webhook defense-in-depth)."""
+        return await self._request("GET", f"/payments/{payment_id}")

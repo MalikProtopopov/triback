@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import structlog
@@ -37,7 +38,7 @@ class TelegramService:
 
     # ── Bot API helpers ───────────────────────────────────────────
 
-    async def send_message(self, chat_id: int, text: str) -> dict:
+    async def send_message(self, chat_id: int, text: str) -> dict[str, Any]:
         if not self._base:
             raise ValueError("Telegram bot token not configured")
         async with httpx.AsyncClient(timeout=15) as client:
@@ -46,7 +47,8 @@ class TelegramService:
                 json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             )
             resp.raise_for_status()
-            return resp.json()
+            data: dict[str, Any] = resp.json()
+            return data
 
     async def add_to_channel(self, tg_user_id: int) -> None:
         """Unban (=add) user from the private Telegram channel."""
@@ -84,7 +86,7 @@ class TelegramService:
         self,
         db: AsyncSession,
         user_id: str,
-        redis: Redis,  # type: ignore[type-arg]
+        redis: Redis,
     ) -> tuple[str, datetime]:
         """Generate a 6-char auth code for Telegram binding.
 
@@ -124,8 +126,8 @@ class TelegramService:
     async def handle_webhook(
         self,
         db: AsyncSession,
-        redis: Redis,  # type: ignore[type-arg]
-        update: dict,
+        redis: Redis,
+        update: dict[str, Any],
     ) -> None:
         """Process incoming Telegram Bot webhook update (expecting /start {code})."""
         message = update.get("message")
@@ -166,7 +168,7 @@ class TelegramService:
     async def _bind_user(
         self,
         db: AsyncSession,
-        redis: Redis,  # type: ignore[type-arg]
+        redis: Redis,
         binding: TelegramBinding,
         tg_user_id: int,
         tg_username: str,
@@ -210,7 +212,7 @@ class TelegramService:
         self,
         db: AsyncSession,
         user_id: str,
-    ) -> dict:
+    ) -> dict[str, Any]:
         result = await db.execute(
             select(TelegramBinding).where(TelegramBinding.user_id == user_id)
         )

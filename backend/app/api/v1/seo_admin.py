@@ -27,7 +27,7 @@ async def list_seo_pages(
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-) -> dict:
+) -> dict[str, Any]:
     """Пагинированный список всех SEO-страниц.
 
     - **401** — не авторизован

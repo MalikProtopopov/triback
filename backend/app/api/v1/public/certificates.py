@@ -1,6 +1,7 @@
 """Public (no-auth) certificate verification endpoint."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/public/certificates")
 async def verify_certificate(
     certificate_number: str,
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> dict[str, Any]:
     """Public endpoint for QR code verification. No authentication required.
 
     Returns certificate details and validity status. Used by the client

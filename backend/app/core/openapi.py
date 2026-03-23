@@ -1,5 +1,7 @@
 """OpenAPI helpers for consistent error response documentation."""
 
+from typing import Any
+
 from app.core.exceptions import ErrorResponse
 
 _ERROR_MAP: dict[int, tuple[str, str, str]] = {
@@ -12,7 +14,7 @@ _ERROR_MAP: dict[int, tuple[str, str, str]] = {
 }
 
 
-def error_responses(*codes: int) -> dict:
+def error_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
     """Build ``responses`` dict for FastAPI route decorator.
 
     Usage::
@@ -20,7 +22,7 @@ def error_responses(*codes: int) -> dict:
         @router.get("/items/{id}", responses=error_responses(404))
         @router.post("/items", responses=error_responses(401, 409, 422))
     """
-    result: dict = {}
+    result: dict[int | str, dict[str, Any]] = {}
     for code in codes:
         if code not in _ERROR_MAP:
             continue

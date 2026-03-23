@@ -33,7 +33,7 @@ async def send_notification(
     body: SendNotificationRequest,
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> dict:
+) -> NotificationResponse:
     """Отправляет уведомление пользователю через выбранные каналы (email, push, telegram).
 
     - **401** — не авторизован
@@ -70,7 +70,7 @@ async def list_notifications(
     status: str | None = Query(None, description="sent | failed | pending"),
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
-) -> PaginatedResponse:
+) -> PaginatedResponse[NotificationListItem]:
     """Пагинированный журнал всех отправленных уведомлений.
 
     - **401** — не авторизован
@@ -96,16 +96,16 @@ async def list_notifications(
     notifs = result.scalars().all()
 
     data = [
-        {
-            "id": str(n.id),
-            "user_id": n.user_id,
-            "template_code": n.template_code,
-            "channel": n.channel,
-            "title": n.title,
-            "status": n.status,
-            "sent_at": n.sent_at.isoformat() if n.sent_at else None,
-            "created_at": n.created_at.isoformat(),
-        }
+        NotificationListItem(
+            id=n.id,
+            user_id=n.user_id,
+            template_code=n.template_code,
+            channel=n.channel,
+            title=n.title,
+            status=n.status,
+            sent_at=n.sent_at,
+            created_at=n.created_at,
+        )
         for n in notifs
     ]
 

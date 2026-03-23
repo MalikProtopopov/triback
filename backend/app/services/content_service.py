@@ -26,11 +26,10 @@ from app.models.content import (
 from app.schemas.content_admin import (
     ArticleAdminDetailResponse,
     ArticleAdminListItem,
-    ContentBlockNested,
     OrgDocDetailResponse,
     ThemeAdminResponse,
-    ThemeNested,
 )
+from app.schemas.shared import ContentBlockNested, ThemeNested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 from app.services.org_doc_admin_service import OrgDocAdminService

@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.utils import generate_unique_slug
 from app.models.content import ContentBlock, OrganizationDocument
-from app.schemas.content_admin import ContentBlockNested, OrgDocDetailResponse, OrgDocListItem
+from app.schemas.content_admin import OrgDocDetailResponse, OrgDocListItem
+from app.schemas.shared import ContentBlockNested
 from app.services import file_service
 
 DOCUMENT_MIMES = file_service.IMAGE_MIMES | {"application/pdf"}
