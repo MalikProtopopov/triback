@@ -24,8 +24,8 @@ def _wrap_html(inner: str) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Plus+Jakarta+Sans:wght@700&display=swap" rel="stylesheet">
 </head>
-<body style="margin:0;padding:0;font-family:'Inter',Arial,Helvetica,sans-serif;background:#F8F9FB;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F8F9FB;padding:40px 0;">
+<body style="margin:0;padding:0;font-family:'Inter',Arial,Helvetica,sans-serif;background:#ffffff;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;padding:40px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
   <tr><td style="background:#E8638B;padding:24px;text-align:center;">
