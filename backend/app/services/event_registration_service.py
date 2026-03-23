@@ -12,6 +12,7 @@ from uuid import UUID
 import structlog
 from redis.asyncio import Redis
 from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -140,6 +141,20 @@ class EventRegistrationService:
 
         await self.redis.delete(verify_key, attempts_key)
 
+        existing_reg = (
+            await self.db.execute(
+                select(EventRegistration)
+                .where(
+                    EventRegistration.user_id == user_id,
+                    EventRegistration.event_id == event_id,
+                    EventRegistration.event_tariff_id == tariff.id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing_reg:
+            raise ConflictError("You have already registered for this event with this tariff")
+
         is_member = await self._is_association_member(user_id)
         applied_price = float(tariff.member_price if is_member else tariff.price)
 
@@ -156,8 +171,12 @@ class EventRegistrationService:
             guest_specialization=body.guest_specialization,
             fiscal_email=body.fiscal_email,
         )
-        self.db.add(reg)
-        await self.db.flush()
+        try:
+            self.db.add(reg)
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise ConflictError("You have already registered for this event with this tariff")
 
         inc_result = await self.db.execute(
             update(EventTariff)
@@ -216,6 +235,20 @@ class EventRegistrationService:
     ) -> RegisterForEventResponse:
         from app.models.users import User
 
+        existing_reg = (
+            await self.db.execute(
+                select(EventRegistration)
+                .where(
+                    EventRegistration.user_id == user_id,
+                    EventRegistration.event_id == event.id,
+                    EventRegistration.event_tariff_id == tariff.id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing_reg:
+            raise ConflictError("You have already registered for this event with this tariff")
+
         user = await self.db.get(User, user_id)
         user_email = user.email if user else None
 
@@ -236,8 +269,12 @@ class EventRegistrationService:
             guest_specialization=body.guest_specialization,
             fiscal_email=body.fiscal_email,
         )
-        self.db.add(reg)
-        await self.db.flush()
+        try:
+            self.db.add(reg)
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise ConflictError("You have already registered for this event with this tariff")
 
         inc_result = await self.db.execute(
             update(EventTariff)
