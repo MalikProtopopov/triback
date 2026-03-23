@@ -184,6 +184,29 @@ def _validation_error_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Log unhandled exceptions with full traceback; return 500 without exposing internals."""
+    import traceback
+
+    logger.exception(
+        "unhandled_exception",
+        path=request.url.path,
+        method=request.method,
+        error=str(exc),
+        traceback=traceback.format_exc(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again later.",
+                "details": {},
+            }
+        },
+    )
+
+
 def create_app() -> FastAPI:
     """Application factory."""
     from fastapi.exceptions import RequestValidationError
@@ -211,6 +234,7 @@ def create_app() -> FastAPI:
     )
 
     register_exception_handlers(app)
+    app.add_exception_handler(Exception, _unhandled_exception_handler)  # type: ignore[arg-type]
 
     from app.api.v1 import router as api_v1_router
 
