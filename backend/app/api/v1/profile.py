@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -18,6 +18,7 @@ from app.schemas.profile import (
     PersonalProfileUpdate,
     PhotoUploadResponse,
     PublicProfileResponse,
+    PublicProfileSubmitResponse,
     PublicProfileUpdate,
 )
 from app.schemas.shared import CityNested
@@ -163,6 +164,49 @@ async def update_public(
     update_data = data.model_dump(exclude_unset=True, mode="json")
     await svc.update_public(user_id, update_data)
     return MessageResponse(message="Изменения отправлены на модерацию")
+
+
+@router.post(
+    "/public/submit",
+    response_model=PublicProfileSubmitResponse,
+    summary="Отправить публичный профиль на модерацию (multipart)",
+    responses=error_responses(401, 404, 422),
+)
+async def submit_public_profile(
+    user_id: UUID = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db_session),
+    photo: UploadFile | None = File(None),
+    bio: str | None = Form(None),
+    public_email: str | None = Form(None),
+    public_phone: str | None = Form(None),
+    city_id: str | None = Form(None),
+    clinic_name: str | None = Form(None),
+    academic_degree: str | None = Form(None),
+    specialization: str | None = Form(None),
+    moderation_comment: str | None = Form(None),
+) -> PublicProfileSubmitResponse:
+    """Один запрос: опционально фото + опционально текстовые поля публичного профиля.
+
+    Поля формы, которые не менялись, не передавайте. Пустой multipart без полей и без файла — **422**.
+    При уже существующей заявке ``pending`` изменения объединяются с ней (вторая строка не создаётся).
+
+    - **401** — не авторизован
+    - **404** — профиль не найден
+    """
+    svc = ProfileService(db)
+    result = await svc.submit_public_profile(
+        user_id,
+        photo=photo,
+        bio=bio,
+        public_email=public_email,
+        public_phone=public_phone,
+        city_id=city_id,
+        clinic_name=clinic_name,
+        academic_degree=academic_degree,
+        specialization=specialization,
+        moderation_comment=moderation_comment,
+    )
+    return PublicProfileSubmitResponse(**result)
 
 
 @router.post(

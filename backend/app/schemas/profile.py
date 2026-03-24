@@ -81,6 +81,14 @@ class PhotoUploadResponse(BaseModel):
     pending_moderation: bool = False
 
 
+class PublicProfileSubmitResponse(BaseModel):
+    """Ответ POST /profile/public/submit — превью фото только если в этом запросе загрузили файл."""
+
+    message: str
+    pending_moderation: bool = True
+    photo_url: str = ""
+
+
 class DiplomaPhotoResponse(BaseModel):
     diploma_photo_url: str
     message: str

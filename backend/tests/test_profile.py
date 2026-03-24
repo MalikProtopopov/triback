@@ -74,6 +74,261 @@ async def test_update_public_profile_creates_draft(
     assert "модерацию" in resp.json().get("message", "").lower() or resp.status_code == 200
 
 
+async def test_patch_public_merges_second_update_into_same_pending_draft(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    """Второй PATCH /public не даёт 409: объединяется с тем же pending."""
+    from sqlalchemy import func, select
+
+    from app.models.profiles import DoctorProfileChange
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await db_session.commit()
+
+    r1 = await client.patch(
+        "/api/v1/profile/public",
+        headers=auth_headers_doctor,
+        json={"bio": "First"},
+    )
+    assert r1.status_code == 200
+    r2 = await client.patch(
+        "/api/v1/profile/public",
+        headers=auth_headers_doctor,
+        json={"public_email": "doc@example.com"},
+    )
+    assert r2.status_code == 200
+
+    cnt = (
+        await db_session.execute(
+            select(func.count()).select_from(DoctorProfileChange).where(
+                DoctorProfileChange.status == "pending",
+            )
+        )
+    ).scalar_one()
+    assert cnt == 1
+
+    draft = (
+        await db_session.execute(select(DoctorProfileChange).where(
+            DoctorProfileChange.status == "pending",
+        ))
+    ).scalar_one()
+    assert draft.changes.get("bio") == "First"
+    assert draft.changes.get("public_email") == "doc@example.com"
+
+
+SUBMIT_URL = "/api/v1/profile/public/submit"
+
+
+async def test_submit_public_empty_multipart_422(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await db_session.commit()
+
+    resp = await client.post(SUBMIT_URL, headers=auth_headers_doctor, data={})
+    assert resp.status_code == 422
+
+
+async def test_submit_public_text_only(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    from sqlalchemy import select
+
+    from app.models.profiles import DoctorProfileChange
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await db_session.commit()
+
+    resp = await client.post(
+        SUBMIT_URL,
+        headers=auth_headers_doctor,
+        data={"bio": "From submit"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("pending_moderation") is True
+    assert (body.get("photo_url") or "") == ""
+
+    draft = (
+        await db_session.execute(select(DoctorProfileChange).where(
+            DoctorProfileChange.status == "pending",
+        ))
+    ).scalar_one()
+    assert draft.changes.get("bio") == "From submit"
+
+
+async def test_submit_public_invalid_email_422(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await db_session.commit()
+
+    resp = await client.post(
+        SUBMIT_URL,
+        headers=auth_headers_doctor,
+        data={"public_email": "not-an-email"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_submit_public_merges_into_existing_pending(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    from sqlalchemy import func, select
+
+    from app.models.profiles import DoctorProfileChange
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await db_session.commit()
+
+    await client.patch(
+        "/api/v1/profile/public",
+        headers=auth_headers_doctor,
+        json={"bio": "Patch bio"},
+    )
+    r2 = await client.post(
+        SUBMIT_URL,
+        headers=auth_headers_doctor,
+        data={"public_phone": "+79990001122"},
+    )
+    assert r2.status_code == 200
+
+    cnt = (
+        await db_session.execute(
+            select(func.count()).select_from(DoctorProfileChange).where(
+                DoctorProfileChange.status == "pending",
+            )
+        )
+    ).scalar_one()
+    assert cnt == 1
+    draft = (
+        await db_session.execute(select(DoctorProfileChange).where(
+            DoctorProfileChange.status == "pending",
+        ))
+    ).scalar_one()
+    assert draft.changes.get("bio") == "Patch bio"
+    assert draft.changes.get("public_phone") == "+79990001122"
+
+
+async def test_submit_public_photo_only(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+    monkeypatch,
+):
+    from io import BytesIO
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy import select
+
+    from app.models.profiles import DoctorProfileChange
+    from app.services import profile_service as ps_mod
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        ps_mod.file_service,
+        "upload_image_with_thumbnail",
+        AsyncMock(return_value=("doctors/photo/main.webp", "doctors/photo/thumb.webp")),
+    )
+    monkeypatch.setattr(
+        ps_mod.file_service,
+        "build_media_url",
+        lambda key: f"https://media.example/{key}" if key else "",
+    )
+
+    fake_image = BytesIO(b"\x00" * 64)
+    resp = await client.post(
+        SUBMIT_URL,
+        headers=auth_headers_doctor,
+        files={"photo": ("p.png", fake_image, "image/png")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "media.example" in (data.get("photo_url") or "")
+    assert data.get("pending_moderation") is True
+
+    draft = (
+        await db_session.execute(select(DoctorProfileChange).where(
+            DoctorProfileChange.status == "pending",
+        ))
+    ).scalar_one()
+    assert draft.changes.get("photo_url") == "doctors/photo/main.webp"
+
+
+async def test_submit_public_photo_and_text_together(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+    monkeypatch,
+):
+    from io import BytesIO
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy import select
+
+    from app.models.profiles import DoctorProfileChange
+    from app.services import profile_service as ps_mod
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        ps_mod.file_service,
+        "upload_image_with_thumbnail",
+        AsyncMock(return_value=("doctors/x/main.webp", "doctors/x/thumb.webp")),
+    )
+    monkeypatch.setattr(
+        ps_mod.file_service,
+        "build_media_url",
+        lambda key: f"https://cdn/{key}" if key else "",
+    )
+
+    fake_image = BytesIO(b"\x00" * 64)
+    resp = await client.post(
+        SUBMIT_URL,
+        headers=auth_headers_doctor,
+        data={"bio": "Bio + photo"},
+        files={"photo": ("p.png", fake_image, "image/png")},
+    )
+    assert resp.status_code == 200
+
+    draft = (
+        await db_session.execute(select(DoctorProfileChange).where(
+            DoctorProfileChange.status == "pending",
+        ))
+    ).scalar_one()
+    assert draft.changes.get("bio") == "Bio + photo"
+    assert draft.changes.get("photo_url") == "doctors/x/main.webp"
+
+
 async def test_get_public_returns_rejected_draft_with_reason(
     client: AsyncClient,
     auth_headers_doctor: dict[str, str],
