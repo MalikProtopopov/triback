@@ -229,7 +229,35 @@ async def test_moneta_check_url_valid_order(
     }
     resp = await client.get("/api/v1/webhooks/moneta/check", params=params)
     assert resp.status_code == 200
-    assert "<MNT_RESULT_CODE>200</MNT_RESULT_CODE>" in resp.text
+    assert "<MNT_RESULT_CODE>402</MNT_RESULT_CODE>" in resp.text
+    assert "15000.00" in resp.text
+
+
+@pytest.mark.anyio
+async def test_moneta_check_url_pending_no_amount_returns_100(
+    client: AsyncClient,
+    pending_payment: Payment,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Когда Moneta не передаёт MNT_AMOUNT, по Assistant глава 5 — код 100 + сумма."""
+    monkeypatch.setattr("app.core.config.settings.MONETA_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr("app.core.config.settings.MONETA_MNT_ID", "mnt-1")
+
+    txn_id = str(pending_payment.id)
+    sig = _make_signature("mnt-1", txn_id, "", "", "test-secret")
+    params = {
+        "MNT_ID": "mnt-1",
+        "MNT_TRANSACTION_ID": txn_id,
+        "MNT_OPERATION_ID": "",
+        "MNT_CURRENCY_CODE": "RUB",
+        "MNT_SUBSCRIBER_ID": "",
+        "MNT_TEST_MODE": "",
+        "MNT_SIGNATURE": sig,
+    }
+    resp = await client.get("/api/v1/webhooks/moneta/check", params=params)
+    assert resp.status_code == 200
+    assert "<MNT_RESULT_CODE>100</MNT_RESULT_CODE>" in resp.text
+    assert "15000.00" in resp.text
 
 
 @pytest.mark.anyio
@@ -254,7 +282,7 @@ async def test_moneta_check_url_unknown_order(
     }
     resp = await client.get("/api/v1/webhooks/moneta/check", params=params)
     assert resp.status_code == 200
-    assert "<MNT_RESULT_CODE>402</MNT_RESULT_CODE>" in resp.text
+    assert "<MNT_RESULT_CODE>500</MNT_RESULT_CODE>" in resp.text
 
 
 @pytest.mark.anyio

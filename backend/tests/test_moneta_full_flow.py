@@ -8,13 +8,13 @@ MD5 signature so the entire internal chain is validated end-to-end.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from unittest.mock import AsyncMock, patch
 
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment, Plan, Subscription
@@ -152,7 +152,7 @@ async def test_full_subscription_payment_flow(
         },
     )
     assert check_resp.status_code == 200
-    assert "<MNT_RESULT_CODE>200</MNT_RESULT_CODE>" in check_resp.text
+    assert "<MNT_RESULT_CODE>402</MNT_RESULT_CODE>" in check_resp.text
 
     # --- Pay URL webhook (payment success notification) ---
     pay_sig = _make_signature(MNT_ID, payment_id, fake_op_id, amount_str, WEBHOOK_SECRET)
@@ -285,19 +285,19 @@ async def test_full_event_payment_flow(
 
 
 # ------------------------------------------------------------------
-# 3. Check URL rejects mismatched amount
+# 3. Check URL — неизвестный платёж → 500 (заказ не актуален)
 # ------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_webhook_with_wrong_amount_rejected(
+async def test_webhook_check_unknown_transaction_returns_500(
     client: AsyncClient,
     db_session: AsyncSession,
     doctor_user,
     sub_plan: Plan,
     _moneta_settings,
 ) -> None:
-    """Check URL should return 402 for non-existent payment or wrong amount scenario."""
+    """Неизвестный MNT_TRANSACTION_ID — MNT_RESULT_CODE 500 по семантике Assistant."""
     unknown_txn = str(uuid4())
     sig = _make_signature(MNT_ID, unknown_txn, "", "99999.00", WEBHOOK_SECRET)
     resp = await client.get(
@@ -314,7 +314,7 @@ async def test_webhook_with_wrong_amount_rejected(
         },
     )
     assert resp.status_code == 200
-    assert "<MNT_RESULT_CODE>402</MNT_RESULT_CODE>" in resp.text
+    assert "<MNT_RESULT_CODE>500</MNT_RESULT_CODE>" in resp.text
 
 
 # ------------------------------------------------------------------

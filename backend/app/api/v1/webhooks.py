@@ -1,5 +1,6 @@
 """Webhook endpoints — YooKassa & Moneta payment notifications."""
 
+from decimal import Decimal
 from uuid import UUID
 
 import structlog
@@ -122,7 +123,6 @@ async def _collect_moneta_params(request: Request) -> dict[str, str]:
     methods=["GET", "POST"],
     summary="Moneta Pay URL webhook",
 )
-@limiter.limit("120/minute")
 async def moneta_pay_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
@@ -249,21 +249,20 @@ async def moneta_pay_webhook(
     methods=["GET", "POST"],
     summary="Moneta Check URL",
 )
-@limiter.limit("120/minute")
 async def moneta_check_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Moneta Check URL — предварительная проверка заказа перед оплатой.
 
-    Moneta отправляет запрос для валидации: существует ли платёж, корректна ли
-    сумма. XML-ответ (см. также docs/MONETA_WEBHOOK_TROUBLESHOOTING.md):
+    Коды ответа в XML (``MNT_RESULT_CODE``) по документу MONETA.Assistant, глава 5
+    (см. ``docs/new_moneta/MONETA.Assistant.ru__9_.pdf`` и
+    ``docs/MONETA_WEBHOOK_TROUBLESHOOTING.md``):
 
-    - ``200`` — заказ найден и доступен для оплаты (``pending``) или уже оплачен
-      (``succeeded``). Для ``pending`` в ответ включается ``MNT_AMOUNT``.
-    - ``402`` — заказ не найден (неверный ID) или недоступен для оплаты
-      (``failed`` / ``expired`` / и т.д.).
-    - ``500`` — неверная подпись или несовпадение суммы с заказом.
+    - ``100`` — в запросе **не было** ``MNT_AMOUNT``; в ответе передаём сумму заказа.
+    - ``402`` — заказ создан и готов к оплате (``pending``), в запросе сумма уже была.
+    - ``200`` — заказ уже оплачен (``succeeded``).
+    - ``500`` — заказ не актуален / не найден; либо неверная подпись входящего запроса.
     """
     params = await _collect_moneta_params(request)
     mnt_id = params.get("MNT_ID", "")
@@ -314,25 +313,37 @@ async def moneta_check_webhook(
         amount_str = f"{float(payment.amount):.2f}"
         req_amount = (params.get("MNT_AMOUNT") or "").strip()
         if req_amount:
+            # Не отклоняем оплату при расхождении суммы (как main-before-refactor):
+            # только логируем — Moneta/формат строки могут расходиться с Decimal в БД.
             try:
-                req_norm = f"{float(req_amount):.2f}"
-            except ValueError:
-                req_norm = ""
-            if req_norm and req_norm != amount_str:
-                xml = provider.build_check_response(
-                    mnt_id,
-                    mnt_transaction_id,
-                    MonetaCheckResultCode.NOT_RELEVANT,
+                req_norm = f"{Decimal(req_amount.replace(',', '.')):.2f}"
+                db_norm = f"{Decimal(str(payment.amount)):.2f}"
+                if req_norm != db_norm:
+                    logger.warning(
+                        "moneta_check_amount_mismatch_ignored",
+                        mnt_transaction_id=mnt_transaction_id,
+                        request_amount=req_amount,
+                        payment_amount_db=amount_str,
+                    )
+            except Exception:
+                logger.warning(
+                    "moneta_check_amount_parse_failed",
+                    mnt_transaction_id=mnt_transaction_id,
+                    request_amount=req_amount,
                 )
-            else:
-                # 402 = «Заказ создан и готов к оплате» — правильный код для pending
-                xml = provider.build_check_response(
-                    mnt_id, mnt_transaction_id, MonetaCheckResultCode.READY_FOR_PAYMENT, amount=amount_str
-                )
-        else:
-            # MNT_AMOUNT не пришёл — возвращаем сумму с кодом 402
             xml = provider.build_check_response(
-                mnt_id, mnt_transaction_id, MonetaCheckResultCode.READY_FOR_PAYMENT, amount=amount_str
+                mnt_id,
+                mnt_transaction_id,
+                MonetaCheckResultCode.READY_FOR_PAYMENT,
+                amount=amount_str,
+            )
+        else:
+            # В проверочном запросе не было MNT_AMOUNT — по PDF отвечаем кодом 100 + сумма
+            xml = provider.build_check_response(
+                mnt_id,
+                mnt_transaction_id,
+                MonetaCheckResultCode.AMOUNT_REQUIRED,
+                amount=amount_str,
             )
     elif payment.status == PaymentStatus.SUCCEEDED:
         xml = provider.build_check_response(
@@ -362,7 +373,6 @@ async def moneta_check_webhook(
     "/moneta/receipt",
     summary="Moneta receipt webhook",
 )
-@limiter.limit("120/minute")
 async def moneta_receipt_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session),

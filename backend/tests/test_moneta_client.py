@@ -97,6 +97,7 @@ async def test_create_invoice_sends_correct_envelope(provider: MonetaPaymentProv
     assert envelope["Header"]["Security"]["UsernameToken"]["Username"] == "test-user"
     assert envelope["Header"]["Security"]["UsernameToken"]["Password"] == "test-pass"
     body = envelope["Body"]["InvoiceRequest"]
+    assert body["version"] == "VERSION_2"
     assert body["payer"] == "card"
     assert body["payee"] == "12345678"
     assert body["amount"] == 500.0
@@ -156,6 +157,7 @@ async def test_create_invoice_multiple_items(provider: MonetaPaymentProvider):
     assert result.external_id == "67890"
     payload = (mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json"))
     body = payload["Envelope"]["Body"]["InvoiceRequest"]
+    assert body["version"] == "VERSION_2"
     assert body["payer"] == "card"
     assert body["amount"] == 20000.0
 
