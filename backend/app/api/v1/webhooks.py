@@ -281,7 +281,7 @@ async def moneta_check_webhook(
             params_safe=moneta_params_for_log(params),
         )
         xml = provider.build_check_response(
-            mnt_id, mnt_transaction_id, MonetaCheckResultCode.INVALID_SIGNATURE_OR_AMOUNT_MISMATCH
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.NOT_RELEVANT
         )
         logger.info("moneta_check_response_xml", xml_len=len(xml))
         return Response(content=xml, media_type="application/xml; charset=utf-8")
@@ -308,7 +308,7 @@ async def moneta_check_webhook(
 
     if not payment:
         xml = provider.build_check_response(
-            mnt_id, mnt_transaction_id, MonetaCheckResultCode.NOT_FOUND_OR_UNAVAILABLE
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.NOT_RELEVANT
         )
     elif payment.status == PaymentStatus.PENDING:
         amount_str = f"{float(payment.amount):.2f}"
@@ -322,23 +322,25 @@ async def moneta_check_webhook(
                 xml = provider.build_check_response(
                     mnt_id,
                     mnt_transaction_id,
-                    MonetaCheckResultCode.INVALID_SIGNATURE_OR_AMOUNT_MISMATCH,
+                    MonetaCheckResultCode.NOT_RELEVANT,
                 )
             else:
+                # 402 = «Заказ создан и готов к оплате» — правильный код для pending
                 xml = provider.build_check_response(
-                    mnt_id, mnt_transaction_id, MonetaCheckResultCode.OK, amount=amount_str
+                    mnt_id, mnt_transaction_id, MonetaCheckResultCode.READY_FOR_PAYMENT, amount=amount_str
                 )
         else:
+            # MNT_AMOUNT не пришёл — возвращаем сумму с кодом 402
             xml = provider.build_check_response(
-                mnt_id, mnt_transaction_id, MonetaCheckResultCode.OK, amount=amount_str
+                mnt_id, mnt_transaction_id, MonetaCheckResultCode.READY_FOR_PAYMENT, amount=amount_str
             )
     elif payment.status == PaymentStatus.SUCCEEDED:
         xml = provider.build_check_response(
-            mnt_id, mnt_transaction_id, MonetaCheckResultCode.OK
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.ALREADY_PAID
         )
     else:
         xml = provider.build_check_response(
-            mnt_id, mnt_transaction_id, MonetaCheckResultCode.NOT_FOUND_OR_UNAVAILABLE
+            mnt_id, mnt_transaction_id, MonetaCheckResultCode.NOT_RELEVANT
         )
 
     logger.info(

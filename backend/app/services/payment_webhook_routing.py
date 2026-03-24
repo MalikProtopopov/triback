@@ -30,11 +30,28 @@ MONETA_PAY_COMMANDS_WITH_SIGNATURE = frozenset({
 # Moneta — Check URL: MNT_RESULT_CODE в XML
 # ---------------------------------------------------------------------------
 class MonetaCheckResultCode:
-    """Коды ответа Check URL (см. docs/MONETA_WEBHOOK_TROUBLESHOOTING.md)."""
+    """Коды ответа Check URL согласно документации MONETA.Assistant (Глава 5).
 
-    OK = "200"
-    NOT_FOUND_OR_UNAVAILABLE = "402"
-    INVALID_SIGNATURE_OR_AMOUNT_MISMATCH = "500"
+    100 — вернуть сумму заказа (когда MNT_AMOUNT не был передан в запросе)
+    200 — заказ уже оплачен, уведомление доставлено
+    302 — заказ в обработке
+    402 — заказ создан и ГОТОВ К ОПЛАТЕ (использовать для pending-заказов)
+    500 — заказ не актуален (отменён/не найден)
+
+    Примечание из документации: «В обычных случаях для продолжения процесса
+    оплаты следует использовать код ответа 402 или 100.»
+    """
+
+    AMOUNT_REQUIRED = "100"   # MNT_AMOUNT не пришёл — вернуть сумму
+    ALREADY_PAID = "200"       # заказ уже оплачен
+    IN_PROGRESS = "302"        # в обработке
+    READY_FOR_PAYMENT = "402"  # заказ готов к оплате (pending)
+    NOT_RELEVANT = "500"       # заказ не актуален / не найден
+
+    # Обратная совместимость
+    OK = ALREADY_PAID
+    NOT_FOUND_OR_UNAVAILABLE = READY_FOR_PAYMENT
+    INVALID_SIGNATURE_OR_AMOUNT_MISMATCH = NOT_RELEVANT
 
 
 # ---------------------------------------------------------------------------
