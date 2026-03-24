@@ -1,5 +1,5 @@
-"""Doctor profile models: specializations, doctor_profiles, doctor_specializations,
-doctor_documents, doctor_profile_changes, moderation_history, audit_log."""
+"""Doctor profile models: doctor_profiles, doctor_documents, doctor_profile_changes,
+moderation_history, audit_log."""
 
 from datetime import datetime
 from typing import Any
@@ -30,27 +30,11 @@ from app.models.base import (
 )
 
 
-class Specialization(Base, UUIDMixin, TimestampMixin):
-    __tablename__ = "specializations"
-    __table_args__ = (
-        Index("idx_specializations_active_sort", "is_active", "sort_order"),
-    )
-
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
-
-    doctor_specializations: Mapped[list["DoctorSpecialization"]] = relationship(
-        back_populates="specialization"
-    )
-
-
 class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "doctor_profiles"
     __table_args__ = (
         Index("idx_doctor_profiles_user_id", "user_id"),
         Index("idx_doctor_profiles_city", "city_id"),
-        Index("idx_doctor_profiles_specialization", "specialization_id"),
         Index("idx_doctor_profiles_status", "status"),
         Index("idx_doctor_profiles_name", "last_name", "first_name"),
         Index(
@@ -79,10 +63,7 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     city_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("cities.id", ondelete="SET NULL")
     )
-    specialization_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("specializations.id", ondelete="SET NULL"),
-        comment="Deprecated — use doctor_specializations M:N",
-    )
+    specialization: Mapped[str | None] = mapped_column(String(255))
     clinic_name: Mapped[str | None] = mapped_column(String(255))
     position: Mapped[str | None] = mapped_column(String(255))
     academic_degree: Mapped[str | None] = mapped_column(String(255))
@@ -107,40 +88,11 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     user: Mapped["User"] = relationship(back_populates="doctor_profile")  # type: ignore[name-defined]  # noqa: F821
     city: Mapped["City | None"] = relationship()  # type: ignore[name-defined]  # noqa: F821
-    specialization: Mapped["Specialization | None"] = relationship()
-    doctor_specializations: Mapped[list["DoctorSpecialization"]] = relationship(
-        back_populates="doctor_profile", cascade="all, delete-orphan"
-    )
     documents: Mapped[list["DoctorDocument"]] = relationship(
         back_populates="doctor_profile", cascade="all, delete-orphan"
     )
     profile_changes: Mapped[list["DoctorProfileChange"]] = relationship(
         back_populates="doctor_profile", cascade="all, delete-orphan"
-    )
-
-
-class DoctorSpecialization(Base):
-    __tablename__ = "doctor_specializations"
-    __table_args__ = (
-        Index("idx_doctor_specializations_spec", "specialization_id"),
-    )
-
-    doctor_profile_id: Mapped[UUID] = mapped_column(
-        ForeignKey("doctor_profiles.id", ondelete="CASCADE"), primary_key=True
-    )
-    specialization_id: Mapped[UUID] = mapped_column(
-        ForeignKey("specializations.id", ondelete="RESTRICT"), primary_key=True
-    )
-    is_primary: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default="now()", nullable=False
-    )
-
-    doctor_profile: Mapped["DoctorProfile"] = relationship(
-        back_populates="doctor_specializations"
-    )
-    specialization: Mapped["Specialization"] = relationship(
-        back_populates="doctor_specializations"
     )
 
 

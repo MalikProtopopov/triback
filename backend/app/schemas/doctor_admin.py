@@ -16,11 +16,6 @@ from app.schemas.shared import (
 # ── Nested helpers ────────────────────────────────────────────────
 
 
-class SpecializationNested(BaseModel):
-    id: UUID
-    name: str
-
-
 class DocumentNested(BaseModel):
     id: UUID
     document_type: str
@@ -64,7 +59,7 @@ class AdminCreateDoctorRequest(BaseModel):
     bio: str | None = None
     public_email: str | None = Field(None, max_length=255)
     public_phone: str | None = Field(None, max_length=20)
-    specialization_ids: list[UUID] | None = None
+    specialization: str | None = Field(None, max_length=255)
     status: Literal["approved", "pending_review"] = "approved"
     send_invite: bool = True
 
@@ -240,6 +235,7 @@ class PortalUserListItem(BaseModel):
     role_display: str | None = None
     onboarding_status: str | None = None
     doctor_profile_id: UUID | None = None
+    specialization: str | None = None
     subscription: SubscriptionNested | None = None
     last_payment: PaymentNested | None = None
     telegram_linked: bool = False
@@ -258,6 +254,7 @@ class PortalUserDetailResponse(BaseModel):
     onboarding_status: str | None = None
     doctor_profile_id: UUID | None = None
     doctor_profile_status: str | None = None
+    specialization: str | None = None
     subscription: SubscriptionNested | None = None
     payments: list[PaymentNested] = []
     telegram_linked: bool = False

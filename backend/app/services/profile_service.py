@@ -128,6 +128,7 @@ class ProfileService:
             "city": city_data,
             "clinic_name": profile.clinic_name,
             "academic_degree": profile.academic_degree,
+            "specialization": profile.specialization,
             "pending_draft": draft_data,
         }
 

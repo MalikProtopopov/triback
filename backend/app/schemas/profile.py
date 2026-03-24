@@ -27,6 +27,7 @@ class PersonalProfileResponse(BaseModel):
     clinic_name: str | None = None
     position: str | None = None
     academic_degree: str | None = None
+    specialization: str | None = None
     diploma_photo_url: str | None = None
     colleague_contacts: str | None = None
     documents: list[DocumentNested] = []
@@ -40,6 +41,7 @@ class PersonalProfileUpdate(BaseModel):
     passport_data: str | None = None
     registration_address: str | None = None
     colleague_contacts: str | None = None
+    specialization: str | None = Field(None, max_length=255)
 
 
 class PendingDraftNested(BaseModel):
@@ -58,6 +60,7 @@ class PublicProfileResponse(BaseModel):
     city: CityNested | None = None
     clinic_name: str | None = None
     academic_degree: str | None = None
+    specialization: str | None = None
     pending_draft: PendingDraftNested | None = None
 
 
@@ -68,6 +71,7 @@ class PublicProfileUpdate(BaseModel):
     city_id: UUID | None = None
     clinic_name: str | None = Field(None, max_length=255)
     academic_degree: str | None = Field(None, max_length=255)
+    specialization: str | None = Field(None, max_length=255)
     moderation_comment: str | None = None
 
 

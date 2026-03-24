@@ -86,6 +86,7 @@ async def create_doctor_profile(
     status: str = "active",
     city: City | None = None,
     has_medical_diploma: bool = True,
+    specialization: str | None = None,
 ) -> DoctorProfile:
     if user is None:
         user = await create_user(db)
@@ -99,6 +100,7 @@ async def create_doctor_profile(
         has_medical_diploma=has_medical_diploma,
         city_id=city.id if city else None,
         slug=f"doctor-{n}",
+        specialization=specialization,
     )
     db.add(profile)
     await db.flush()

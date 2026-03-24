@@ -12,7 +12,7 @@ from sqlalchemy.orm import joinedload
 from app.core.enums import DoctorStatus, SubscriptionStatus
 from app.core.exceptions import NotFoundError
 from app.models.cities import City
-from app.models.profiles import DoctorProfile, Specialization
+from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Subscription
 from app.schemas.public import DoctorPublicDetailResponse, DoctorPublicListItem, SeoNested
 from app.schemas.shared import ContentBlockPublicNested
@@ -54,10 +54,7 @@ class DoctorCatalogService:
         active_sub = _has_active_subscription()
         base = (
             select(DoctorProfile)
-            .options(
-                joinedload(DoctorProfile.city),
-                joinedload(DoctorProfile.specialization),
-            )
+            .options(joinedload(DoctorProfile.city))
             .where(DoctorProfile.status == DoctorStatus.ACTIVE, active_sub)
         )
         count_q = select(func.count(DoctorProfile.id)).where(
@@ -79,13 +76,7 @@ class DoctorCatalogService:
         if board_role and len(board_role) > 0:
             filters.append(DoctorProfile.board_role.in_(board_role))
         if specialization:
-            base = base.join(
-                Specialization, DoctorProfile.specialization_id == Specialization.id, isouter=True,
-            )
-            count_q = count_q.join(
-                Specialization, DoctorProfile.specialization_id == Specialization.id, isouter=True,
-            )
-            filters.append(Specialization.name.ilike(f"%{specialization}%"))
+            filters.append(DoctorProfile.specialization.ilike(f"%{specialization}%"))
         if search and len(search) >= 2:
             pattern = f"%{search}%"
             filters.append(
@@ -113,7 +104,7 @@ class DoctorCatalogService:
             middle_name=dp.middle_name,
             city=dp.city.name if dp.city else None,
             clinic_name=dp.clinic_name,
-            specialization=dp.specialization.name if dp.specialization else None,
+            specialization=dp.specialization,
             academic_degree=dp.academic_degree,
             bio=dp.bio,
             photo_url=file_service.build_media_url(dp.photo_url),
@@ -132,7 +123,7 @@ class DoctorCatalogService:
 
         result = await self.db.execute(
             select(DoctorProfile)
-            .options(joinedload(DoctorProfile.city), joinedload(DoctorProfile.specialization))
+            .options(joinedload(DoctorProfile.city))
             .where(and_(id_filter, DoctorProfile.status == DoctorStatus.ACTIVE, _has_active_subscription()))
         )
         dp = result.unique().scalar_one_or_none()
@@ -177,7 +168,7 @@ class DoctorCatalogService:
             city=city_name,
             clinic_name=dp.clinic_name,
             position=dp.position,
-            specialization=dp.specialization.name if dp.specialization else None,
+            specialization=dp.specialization,
             academic_degree=dp.academic_degree,
             bio=dp.bio,
             photo_url=file_service.build_media_url(dp.photo_url),

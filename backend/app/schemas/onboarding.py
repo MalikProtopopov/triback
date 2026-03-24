@@ -21,6 +21,7 @@ class OnboardingProfileUpdate(BaseModel):
     clinic_name: str | None = Field(None, max_length=255)
     position: str | None = Field(None, max_length=255)
     academic_degree: str | None = Field(None, max_length=255)
+    specialization: str | None = Field(None, max_length=255)
 
 
 class OnboardingStatusResponse(BaseModel):

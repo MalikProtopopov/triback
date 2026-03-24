@@ -21,6 +21,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.models.profiles import DoctorProfile
 from app.models.users import Role, User, UserRoleAssignment
 from app.schemas.auth import CurrentUserResponse
 from app.tasks.email_tasks import (
@@ -316,10 +317,20 @@ class AuthService:
         is_staff = role in ("admin", "manager", "accountant")
         sidebar_sections = get_sidebar_sections_for_role(role)
 
+        spec: str | None = None
+        if role == "doctor":
+            dp_result = await self.db.execute(
+                select(DoctorProfile.specialization).where(
+                    DoctorProfile.user_id == user.id
+                )
+            )
+            spec = dp_result.scalar_one_or_none()
+
         return CurrentUserResponse(
             id=str(user.id),
             email=user.email,
             role=role,
             is_staff=is_staff,
             sidebar_sections=sidebar_sections,
+            specialization=spec,
         )

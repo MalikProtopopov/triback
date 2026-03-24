@@ -79,6 +79,7 @@ async def test_create_doctor_full_fields(
             "bio": "Опытный трихолог",
             "public_email": "maria@clinic.com",
             "public_phone": "+79009876544",
+            "specialization": "Трихолог",
             "status": "pending_review",
         },
     )
@@ -86,6 +87,13 @@ async def test_create_doctor_full_fields(
     data = resp.json()
     assert data["status"] == "pending_review"
     assert data["first_name"] == "Мария"
+
+    detail = await client.get(
+        f"{ADMIN_DOCTORS_URL}/{data['profile_id']}",
+        headers=auth_headers_admin,
+    )
+    assert detail.status_code == 200
+    assert detail.json().get("specialization") == "Трихолог"
 
 
 async def test_create_doctor_duplicate_email(

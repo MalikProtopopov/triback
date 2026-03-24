@@ -183,6 +183,58 @@ async def test_get_doctor_with_active_subscription(
     assert data["slug"] == profile.slug
 
 
+async def test_list_doctors_filter_by_specialization_substring(
+    client: AsyncClient, db_session: AsyncSession, redis_mock: AsyncMock
+):
+    user = await create_user(db_session)
+    await create_doctor_profile(
+        db_session,
+        user=user,
+        status="active",
+        specialization="Трихолог, косметолог",
+    )
+    plan = await create_plan(db_session)
+    await create_subscription(
+        db_session,
+        user=user,
+        plan=plan,
+        status="active",
+        ends_at=datetime.now(UTC) + timedelta(days=180),
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/doctors?specialization=космет")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 1
+    assert any("космет" in (row.get("specialization") or "").lower() for row in data["data"])
+
+
+async def test_get_doctor_detail_includes_specialization_text(
+    client: AsyncClient, db_session: AsyncSession, redis_mock: AsyncMock
+):
+    user = await create_user(db_session)
+    profile = await create_doctor_profile(
+        db_session,
+        user=user,
+        status="active",
+        specialization="Врач-трихолог",
+    )
+    plan = await create_plan(db_session)
+    await create_subscription(
+        db_session,
+        user=user,
+        plan=plan,
+        status="active",
+        ends_at=datetime.now(UTC) + timedelta(days=180),
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/doctors/{profile.slug}")
+    assert resp.status_code == 200
+    assert resp.json().get("specialization") == "Врач-трихолог"
+
+
 # ── Photo moderation via draft ───────────────────────────────────
 
 

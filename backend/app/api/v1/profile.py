@@ -70,6 +70,7 @@ async def get_personal(
         clinic_name=profile.clinic_name,
         position=profile.position,
         academic_degree=profile.academic_degree,
+        specialization=profile.specialization,
         diploma_photo_url=file_service.build_media_url(profile.diploma_photo_url),
         colleague_contacts=profile.colleague_contacts,
         documents=documents,

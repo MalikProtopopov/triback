@@ -26,9 +26,7 @@ from app.models.profiles import (  # noqa: F401
     DoctorDocument,
     DoctorProfile,
     DoctorProfileChange,
-    DoctorSpecialization,
     ModerationHistory,
-    Specialization,
 )
 from app.models.site import SiteSetting  # noqa: F401
 from app.models.subscriptions import (  # noqa: F401

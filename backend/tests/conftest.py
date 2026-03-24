@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -40,6 +40,24 @@ def pytest_configure(config: pytest.Config) -> None:
     async def _create() -> None:
         eng = create_async_engine(TEST_DB_URL, echo=False)
         async with eng.begin() as conn:
+            # Orphan tables from pre–free-text specialization schema are not in metadata;
+            # remove them so drop_all can recreate doctor_profiles cleanly.
+            await conn.execute(text("DROP TABLE IF EXISTS doctor_specializations CASCADE"))
+            await conn.execute(text("DROP TABLE IF EXISTS specializations CASCADE"))
+            await conn.execute(
+                text("""
+                DO $$ BEGIN
+                  IF EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'doctor_profiles'
+                  ) THEN
+                    ALTER TABLE doctor_profiles
+                      DROP CONSTRAINT IF EXISTS doctor_profiles_specialization_id_fkey;
+                    ALTER TABLE doctor_profiles DROP COLUMN IF EXISTS specialization_id;
+                  END IF;
+                END $$;
+                """)
+            )
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         await eng.dispose()

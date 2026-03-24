@@ -218,7 +218,7 @@ class DoctorAdminRead:
                     middle_name=dp.middle_name,
                     phone=dp.phone,
                     city=city_to_nested(dp.city),
-                    specialization=dp.specialization.name if dp.specialization else None,
+                    specialization=dp.specialization,
                     moderation_status=dp.status,
                     has_medical_diploma=dp.has_medical_diploma,
                     subscription=sub_map.get(dp.user_id),
@@ -260,7 +260,6 @@ class DoctorAdminRead:
             .options(
                 joinedload(DoctorProfile.user),
                 joinedload(DoctorProfile.city),
-                joinedload(DoctorProfile.specialization),
                 selectinload(DoctorProfile.documents),
                 selectinload(DoctorProfile.profile_changes),
             )
@@ -346,7 +345,7 @@ class DoctorAdminRead:
             city=city_to_nested(dp.city),
             clinic_name=dp.clinic_name,
             position=dp.position,
-            specialization=dp.specialization.name if dp.specialization else None,
+            specialization=dp.specialization,
             academic_degree=dp.academic_degree,
             bio=dp.bio,
             public_email=dp.public_email,

@@ -42,6 +42,7 @@ class CurrentUserResponse(BaseModel):
     role: str
     is_staff: bool
     sidebar_sections: list[str]
+    specialization: str | None = None
 
 
 class VerifyEmailRequest(BaseModel):

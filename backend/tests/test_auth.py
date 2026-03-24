@@ -237,3 +237,29 @@ async def test_verify_email_updates_onboarding_status(
     data = status_resp.json()
     assert data["email_verified"] is True
     assert data["next_step"] != "verify_email"
+
+
+async def test_me_includes_specialization_for_doctor(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_doctor: dict[str, str],
+    doctor_user,
+):
+    from tests.factories import create_doctor_profile
+
+    await create_doctor_profile(
+        db_session,
+        user=doctor_user,
+        status="active",
+        specialization="Дерматолог",
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/v1/auth/me",
+        headers=auth_headers_doctor,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("role") == "doctor"
+    assert data.get("specialization") == "Дерматолог"

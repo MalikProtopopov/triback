@@ -128,6 +128,7 @@ class PortalUserService:
             dp_id = dp.id if dp else None
             full_name = f"{dp.last_name} {dp.first_name}" if dp else None
             board_role = dp.board_role if dp else None
+            specialization = dp.specialization if dp else None
 
             tg = tg_map.get(u.id)
             items.append(
@@ -138,6 +139,7 @@ class PortalUserService:
                     role=display_role,
                     role_display=role_display_map.get(display_role, "Без роли") if display_role else "Без роли",
                     doctor_profile_id=dp_id,
+                    specialization=specialization,
                     subscription=sub_map.get(u.id) if display_role == "doctor" else None,
                     telegram_linked=tg is not None,
                     tg_username=tg.tg_username if tg else None,
@@ -166,6 +168,7 @@ class PortalUserService:
         full_name: str | None = None
         dp_status: str | None = None
         board_role: str | None = None
+        specialization: str | None = None
         sub_info: SubscriptionNested | None = None
         payments_list: list[PaymentNested] = []
 
@@ -179,6 +182,7 @@ class PortalUserService:
                 full_name = f"{dp.last_name} {dp.first_name}"
                 dp_status = dp.status
                 board_role = dp.board_role
+                specialization = dp.specialization
                 sub_info = await self._latest_subscription_nested(user.id)
 
         pay_result = await self.db.execute(
@@ -206,6 +210,7 @@ class PortalUserService:
             onboarding_status=None,
             doctor_profile_id=dp_id,
             doctor_profile_status=dp_status,
+            specialization=specialization,
             subscription=sub_info,
             payments=payments_list,
             telegram_linked=tg_binding is not None,

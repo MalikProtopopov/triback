@@ -16,7 +16,7 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logging_privacy import mask_email_for_log
 from app.core.security import hash_password
 from app.core.utils import generate_unique_slug
-from app.models.profiles import DoctorProfile, DoctorSpecialization
+from app.models.profiles import DoctorProfile
 from app.models.users import Role, User, UserRoleAssignment
 from app.schemas.doctor_admin import AdminCreateDoctorResponse, DoctorDetailResponse
 from app.services.doctors.doctor_admin_read import DoctorAdminRead
@@ -84,18 +84,10 @@ class DoctorAdminWrite:
             public_phone=data.get("public_phone"),
             status=data.get("status", DoctorStatus.APPROVED),
             slug=slug,
+            specialization=data.get("specialization"),
         )
         self.db.add(profile)
         await self.db.flush()
-
-        spec_ids = data.get("specialization_ids") or []
-        for sid in spec_ids:
-            self.db.add(
-                DoctorSpecialization(
-                    doctor_profile_id=profile.id,
-                    specialization_id=sid,
-                )
-            )
 
         await self.db.commit()
 

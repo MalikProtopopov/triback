@@ -72,10 +72,7 @@ async def list_colleagues(
 
     base = (
         select(DoctorProfile)
-        .options(
-            joinedload(DoctorProfile.city),
-            joinedload(DoctorProfile.specialization),
-        )
+        .options(joinedload(DoctorProfile.city))
         .where(DoctorProfile.status == DoctorStatus.ACTIVE, active_sub_exists)
     )
     count_q = select(func.count(DoctorProfile.id)).where(
@@ -103,7 +100,7 @@ async def list_colleagues(
             "last_name": dp.last_name,
             "middle_name": dp.middle_name,
             "city": dp.city.name if dp.city else None,
-            "specialization": dp.specialization.name if dp.specialization else None,
+            "specialization": dp.specialization,
             "photo_url": file_service.build_media_url(dp.photo_url),
             "public_phone": dp.public_phone,
             "public_email": dp.public_email,
