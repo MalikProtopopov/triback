@@ -81,7 +81,6 @@ class MonetaPaymentProvider(PaymentProvider):
             "amount": float(total_amount),
             "clientTransaction": transaction_id,
             "description": description,
-            "MNT_TEST_MODE": "0",  # 0 на проде, 1 на демо; всегда 0 — тестовый режим не включаем
         }
         body = await self._api_request("InvoiceRequest", invoice)
         resp = body["InvoiceResponse"]
