@@ -1,21 +1,41 @@
 """Onboarding service — role selection, profile filling, document upload, submission."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import DoctorStatus
-from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
+from app.core.exceptions import AppValidationError, ConflictError, ForbiddenError, NotFoundError
+from app.core.security import create_access_token
 from app.core.utils import generate_unique_slug
 from app.models.profiles import DoctorDocument, DoctorProfile, ModerationHistory
 from app.models.users import Role, User, UserRoleAssignment
 from app.services import file_service
+from app.services.auth_service import _pick_role
 
 DOCUMENT_TYPES = {"medical_diploma", "retraining_cert", "oncology_cert", "additional_cert"}
+
+_STAFF_ROLES = frozenset({"admin", "manager", "accountant"})
+
+
+def _status_label_for_step(next_step: str) -> str:
+    labels = {
+        "verify_email": "Подтвердите email",
+        "choose_role": "Выберите роль",
+        "completed": "Онбординг завершён",
+        "not_applicable": "Не применяется",
+        "fill_profile": "Заполните анкету врача",
+        "upload_documents": "Загрузите документы",
+        "submit": "Отправьте заявку на модерацию",
+        "await_moderation": "Заявка на модерации",
+    }
+    return labels.get(next_step, next_step)
 
 
 class OnboardingService:
@@ -28,8 +48,6 @@ class OnboardingService:
         if not user:
             raise NotFoundError("User not found")
 
-        email_verified = user.email_verified_at is not None
-
         role_result = await self.db.execute(
             select(Role)
             .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
@@ -37,6 +55,26 @@ class OnboardingService:
         )
         roles = role_result.scalars().all()
         role_names = [r.name for r in roles]
+
+        if any(r in role_names for r in _STAFF_ROLES):
+            return {
+                "email_verified": user.email_verified_at is not None,
+                "role_chosen": True,
+                "role": None,
+                "profile_filled": False,
+                "documents_uploaded": False,
+                "has_medical_diploma": False,
+                "moderation_status": None,
+                "submitted_at": None,
+                "rejection_comment": None,
+                "next_step": "not_applicable",
+                "onboarding_applicable": False,
+                "can_upgrade_to_doctor": False,
+                "status_label": "Онбординг портала не применяется к учётной записи сотрудника",
+                "doctor_onboarding_summary": None,
+            }
+
+        email_verified = user.email_verified_at is not None
 
         has_doctor_role = "doctor" in role_names
         has_user_role = "user" in role_names
@@ -96,6 +134,21 @@ class OnboardingService:
             is_submitted=is_submitted,
         )
 
+        can_upgrade = bool(has_user_role and not has_doctor_role)
+
+        summary = None
+        if has_doctor_role:
+            profile_result = await self.db.execute(
+                select(DoctorProfile).where(DoctorProfile.user_id == user_id)
+            )
+            prof = profile_result.scalar_one_or_none()
+            if prof:
+                summary = {
+                    "moderation_status": prof.status,
+                    "submitted_at": prof.onboarding_submitted_at,
+                    "rejection_comment": rejection_comment,
+                }
+
         return {
             "email_verified": email_verified,
             "role_chosen": role_chosen,
@@ -107,6 +160,10 @@ class OnboardingService:
             "submitted_at": submitted_at,
             "rejection_comment": rejection_comment,
             "next_step": next_step,
+            "onboarding_applicable": True,
+            "can_upgrade_to_doctor": can_upgrade,
+            "status_label": _status_label_for_step(next_step),
+            "doctor_onboarding_summary": summary,
         }
 
     @staticmethod
@@ -140,8 +197,48 @@ class OnboardingService:
             return "fill_profile"
         return "submit"
 
+    async def _emit_access_token_if_needed(
+        self, user_id: UUID, roles_changed: bool
+    ) -> str | None:
+        if not roles_changed:
+            return None
+        r = await self.db.execute(
+            select(Role.name)
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .where(UserRoleAssignment.user_id == user_id)
+        )
+        names = list(r.scalars().all())
+        return create_access_token(user_id, _pick_role(names))
+
+    async def _build_choose_role_response(
+        self,
+        user_id: UUID,
+        *,
+        message: str,
+        roles_changed: bool,
+    ) -> dict[str, Any]:
+        access_token = await self._emit_access_token_if_needed(user_id, roles_changed)
+        st = await self.get_status(user_id)
+        profile_id = None
+        mod_status = None
+        if st.get("role") == "doctor":
+            pr = await self.db.execute(
+                select(DoctorProfile).where(DoctorProfile.user_id == user_id)
+            )
+            prof = pr.scalar_one_or_none()
+            if prof:
+                profile_id = prof.id
+                mod_status = prof.status
+        return {
+            "message": message,
+            "next_step": st["next_step"],
+            "profile_id": profile_id,
+            "moderation_status": mod_status,
+            "access_token": access_token,
+        }
+
     async def choose_role(self, user_id: UUID, role: str) -> dict[str, Any]:
-        """Assign a role to the user. If doctor, create an empty DoctorProfile."""
+        """Assign or upgrade portal role; idempotent when role already matches."""
         role_names_result = await self.db.execute(
             select(Role.name)
             .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
@@ -149,25 +246,55 @@ class OnboardingService:
         )
         current_role_names = list(role_names_result.scalars().all())
 
-        staff_roles = {"admin", "manager", "accountant"}
-        if any(r in current_role_names for r in staff_roles):
-            raise ConflictError(
-                "Пользователи с ролью сотрудника не могут проходить онбординг как врач"
+        if any(r in current_role_names for r in _STAFF_ROLES):
+            raise ForbiddenError(
+                "Онбординг клиентского портала недоступен для учётной записи сотрудника"
             )
-
-        if "doctor" in current_role_names or "user" in current_role_names:
-            raise ConflictError("Роль уже выбрана")
 
         db_role = await self.db.execute(select(Role).where(Role.name == role))
         role_obj = db_role.scalar_one_or_none()
         if not role_obj:
             raise NotFoundError(f"Role '{role}' not found in database")
 
-        assignment = UserRoleAssignment(user_id=user_id, role_id=role_obj.id)
-        self.db.add(assignment)
+        has_doctor = "doctor" in current_role_names
+        has_user = "user" in current_role_names
 
-        profile_id = None
-        if role == "doctor":
+        if has_doctor and role == "user":
+            raise ConflictError(
+                "Смена роли с врача на пользователя через портал не поддерживается"
+            )
+
+        if has_doctor and role == "doctor":
+            return await self._build_choose_role_response(
+                user_id,
+                message="Роль уже выбрана",
+                roles_changed=False,
+            )
+
+        if has_user and not has_doctor and role == "user":
+            return await self._build_choose_role_response(
+                user_id,
+                message="Роль уже выбрана",
+                roles_changed=False,
+            )
+
+        if has_user and not has_doctor and role == "doctor":
+            ur = await self.db.execute(select(Role).where(Role.name == "user"))
+            user_role_obj = ur.scalar_one_or_none()
+            if user_role_obj:
+                await self.db.execute(
+                    delete(UserRoleAssignment).where(
+                        UserRoleAssignment.user_id == user_id,
+                        UserRoleAssignment.role_id == user_role_obj.id,
+                    )
+                )
+            dr = await self.db.execute(select(Role).where(Role.name == "doctor"))
+            doctor_role_obj = dr.scalar_one_or_none()
+            if not doctor_role_obj:
+                raise NotFoundError("Role 'doctor' not found in database")
+            self.db.add(
+                UserRoleAssignment(user_id=user_id, role_id=doctor_role_obj.id)
+            )
             slug = await generate_unique_slug(self.db, DoctorProfile, "doctor")
             profile = DoctorProfile(
                 user_id=user_id,
@@ -178,23 +305,42 @@ class OnboardingService:
                 slug=slug,
             )
             self.db.add(profile)
-            await self.db.flush()
-            profile_id = profile.id
+            await self.db.commit()
+            return await self._build_choose_role_response(
+                user_id,
+                message="Роль врача активирована. Заполните анкету для модерации",
+                roles_changed=True,
+            )
 
-        await self.db.commit()
+        if not has_doctor and not has_user:
+            self.db.add(UserRoleAssignment(user_id=user_id, role_id=role_obj.id))
+            profile_id = None
+            if role == "doctor":
+                slug = await generate_unique_slug(self.db, DoctorProfile, "doctor")
+                profile = DoctorProfile(
+                    user_id=user_id,
+                    first_name="",
+                    last_name="",
+                    phone="",
+                    status=DoctorStatus.PENDING_REVIEW,
+                    slug=slug,
+                )
+                self.db.add(profile)
+                await self.db.flush()
+                profile_id = profile.id
+            await self.db.commit()
+            msg = (
+                "Заполните анкету врача для прохождения модерации"
+                if role == "doctor"
+                else "Роль сохранена"
+            )
+            return await self._build_choose_role_response(
+                user_id,
+                message=msg,
+                roles_changed=True,
+            )
 
-        next_step = "fill_profile" if role == "doctor" else "completed"
-        message = (
-            "Заполните анкету врача для прохождения модерации"
-            if role == "doctor"
-            else "Роль сохранена"
-        )
-        return {
-            "message": message,
-            "next_step": next_step,
-            "profile_id": str(profile_id) if profile_id else None,
-            "moderation_status": DoctorStatus.PENDING_REVIEW if role == "doctor" else None,
-        }
+        raise ConflictError("Не удалось обработать выбор роли")
 
     async def update_doctor_profile(
         self, user_id: UUID, data: dict[str, Any]

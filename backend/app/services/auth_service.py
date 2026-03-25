@@ -42,13 +42,13 @@ def _pick_role(role_names: list[str]) -> str:
     """Return the highest-priority role from a list.
 
     Priority: admin > manager > accountant > doctor > user.
-    Ensures staff users always get their staff role in the JWT even if they
-    also have a 'doctor' or 'user' role assigned by mistake.
+    If there are no role assignments, returns ``pending`` (email verified, role
+    not yet chosen on the portal).
     """
     for role in _ROLE_PRIORITY:
         if role in role_names:
             return role
-    return "user"
+    return "pending"
 
 
 class AuthService:
@@ -71,12 +71,6 @@ class AuthService:
         )
         self.db.add(user)
         await self.db.flush()
-
-        user_role = await self.db.execute(select(Role).where(Role.name == "user"))
-        role = user_role.scalar_one_or_none()
-        if role:
-            assignment = UserRoleAssignment(user_id=user.id, role_id=role.id)
-            self.db.add(assignment)
 
         await self.db.commit()
         await self.db.refresh(user)
@@ -306,13 +300,20 @@ class AuthService:
         user.email = new_email
         await self.db.commit()
 
-    async def get_current_user_info(
-        self, user_id: str, role: str
-    ) -> CurrentUserResponse:
-        """Return current user info with role and sidebar_sections for frontend."""
-        user = await self.db.get(User, user_id)
+    async def get_current_user_info(self, user_id: str) -> CurrentUserResponse:
+        """Return current user info; **role** is always taken from DB (not JWT)."""
+        uid = UUID(user_id) if isinstance(user_id, str) else user_id
+        user = await self.db.get(User, uid)
         if not user:
             raise NotFoundError("User not found")
+
+        role_result = await self.db.execute(
+            select(Role)
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .where(UserRoleAssignment.user_id == uid)
+        )
+        role_names = [r.name for r in role_result.scalars().all()]
+        role = _pick_role(role_names)
 
         is_staff = role in ("admin", "manager", "accountant")
         sidebar_sections = get_sidebar_sections_for_role(role)

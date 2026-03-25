@@ -256,10 +256,7 @@ async def get_me(
     Используется фронтендом для построения сайдбара по ролям.
     """
     svc = AuthService(db, redis)
-    return await svc.get_current_user_info(
-        user_id=payload["sub"],
-        role=payload.get("role", "user"),
-    )
+    return await svc.get_current_user_info(user_id=payload["sub"])
 
 
 @router.post(

@@ -3,9 +3,10 @@
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.auth import _set_access_token_cookie
 from app.core.database import get_db_session
 from app.core.dependencies import get_current_user_id
 from app.core.openapi import error_responses
@@ -44,20 +45,27 @@ async def get_status(
     "/choose-role",
     response_model=OnboardingStepResponse,
     summary="Выбор роли",
-    responses=error_responses(401, 409, 422),
+    responses=error_responses(401, 403, 409, 422),
 )
 async def choose_role(
     data: ChooseRoleRequest,
+    response: Response,
     user_id: UUID = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db_session),
 ) -> OnboardingStepResponse:
-    """Устанавливает роль пользователя (doctor). Можно вызвать только один раз.
+    """Устанавливает роль пользователя (doctor / user), апгрейд user→doctor, идемпотентность.
+
+    При изменении ролей возвращается новый **access_token** (и выставляется cookie), чтобы JWT
+    совпадал с БД для doctor-only API.
 
     - **401** — не авторизован
-    - **409** — роль уже выбрана
+    - **403** — учётная запись сотрудника (онбординг портала недоступен)
+    - **409** — конфликт (например даунгрейд врача)
     """
     svc = OnboardingService(db)
     result = await svc.choose_role(user_id, data.role)
+    if result.get("access_token"):
+        _set_access_token_cookie(response, result["access_token"])
     return OnboardingStepResponse(**result)
 
 

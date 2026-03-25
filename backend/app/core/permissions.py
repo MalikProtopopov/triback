@@ -60,6 +60,11 @@ _CLIENT_SIDEBAR = {
         "telegram",
         "settings",
     ],
+    # No DB role yet — only email verified; must complete onboarding / choose role
+    "pending": [
+        "cabinet",
+        "settings",
+    ],
 }
 
 

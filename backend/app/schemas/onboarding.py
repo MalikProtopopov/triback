@@ -24,6 +24,14 @@ class OnboardingProfileUpdate(BaseModel):
     specialization: str | None = Field(None, max_length=255)
 
 
+class DoctorOnboardingSummary(BaseModel):
+    """Сводка по врачебному онбордингу (только для роли doctor)."""
+
+    moderation_status: str | None = None
+    submitted_at: datetime | None = None
+    rejection_comment: str | None = None
+
+
 class OnboardingStatusResponse(BaseModel):
     email_verified: bool
     role_chosen: bool
@@ -35,6 +43,10 @@ class OnboardingStatusResponse(BaseModel):
     submitted_at: datetime | None = None
     rejection_comment: str | None = None
     next_step: str
+    onboarding_applicable: bool = True
+    can_upgrade_to_doctor: bool = False
+    status_label: str = ""
+    doctor_onboarding_summary: DoctorOnboardingSummary | None = None
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -47,7 +59,15 @@ class OnboardingStatusResponse(BaseModel):
             "moderation_status": "pending_review",
             "submitted_at": "2026-03-10T12:00:00Z",
             "rejection_comment": None,
-            "next_step": "wait_moderation",
+            "next_step": "await_moderation",
+            "onboarding_applicable": True,
+            "can_upgrade_to_doctor": False,
+            "status_label": "На модерации",
+            "doctor_onboarding_summary": {
+                "moderation_status": "pending_review",
+                "submitted_at": "2026-03-10T12:00:00Z",
+                "rejection_comment": None,
+            },
         }
     })
 
@@ -57,6 +77,8 @@ class OnboardingStepResponse(BaseModel):
     next_step: str
     profile_id: UUID | None = None
     moderation_status: str | None = None
+    access_token: str | None = None
+    token_type: str = "bearer"
 
 
 class DocumentUploadResponse(BaseModel):

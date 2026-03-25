@@ -28,6 +28,36 @@ async def test_register_success(client: AsyncClient):
     assert "message" in resp.json()
 
 
+async def test_register_does_not_assign_portal_role(
+    client: AsyncClient, db_session: AsyncSession
+):
+    from sqlalchemy import func, select
+
+    from app.models.users import User, UserRoleAssignment
+
+    email = f"norole_{uuid4().hex[:8]}@test.com"
+    resp = await client.post(
+        REGISTER_URL,
+        json={
+            "email": email,
+            "password": "StrongPass1!",
+            "re_password": "StrongPass1!",
+        },
+    )
+    assert resp.status_code == 201
+    uid = (
+        await db_session.execute(select(User.id).where(User.email == email))
+    ).scalar_one()
+    cnt = (
+        await db_session.execute(
+            select(func.count()).select_from(UserRoleAssignment).where(
+                UserRoleAssignment.user_id == uid
+            )
+        )
+    ).scalar_one()
+    assert cnt == 0
+
+
 async def test_register_duplicate_email(client: AsyncClient):
     payload = {
         "email": "dup_user@test.com",

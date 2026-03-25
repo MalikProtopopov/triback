@@ -9,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services.auth_service import _pick_role
+
 from app.models.users import Role, UserRoleAssignment
 
 
@@ -28,8 +30,7 @@ async def issue_registration_tokens(
         .where(UserRoleAssignment.user_id == user_id)
     )
     role_names = [r.name for r in role_result.scalars().all()]
-    priority = ("admin", "manager", "accountant", "doctor", "user")
-    role_name = next((r for r in priority if r in role_names), "user")
+    role_name = _pick_role(role_names)
 
     jti = generate_token(16)
     access_token = create_access_token(user_id, role_name)

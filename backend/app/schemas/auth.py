@@ -25,7 +25,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    role: str  # admin | manager | accountant | doctor | user
+    role: str  # admin | manager | accountant | doctor | user | pending
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
