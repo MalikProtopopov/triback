@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 from sqlalchemy import select
@@ -21,14 +22,21 @@ from app.core.enums import (
 from app.core.exceptions import ForbiddenError
 from app.core.logging_privacy import yookassa_webhook_body_summary
 from app.models.profiles import DoctorProfile
-from app.models.subscriptions import Payment, Plan, Subscription
+from app.models.subscriptions import Payment, Subscription
 from app.services.payment_utils import is_ip_allowed
 from app.tasks.email_tasks import (
+    send_arrear_paid_notification,
     send_payment_failed_notification,
     send_payment_succeeded_notification,
 )
 
 logger = structlog.get_logger(__name__)
+
+_MSK = ZoneInfo("Europe/Moscow")
+
+
+def _end_of_calendar_year_msk(year: int) -> datetime:
+    return datetime(year, 12, 31, 23, 59, 59, tzinfo=_MSK)
 
 
 class PaymentWebhookService:
@@ -151,7 +159,19 @@ class PaymentWebhookService:
         payment.status = PaymentStatus.SUCCEEDED
         payment.paid_at = now
 
-        if payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
+        arrear_year_for_email: int | None = None
+        if payment.product_type == ProductType.MEMBERSHIP_ARREARS:
+            from app.models.arrears import MembershipArrear
+            from app.services.membership_arrears_service import (
+                mark_arrear_paid_from_payment,
+            )
+
+            await mark_arrear_paid_from_payment(self.db, payment, now)
+            if payment.arrear_id:
+                ar = await self.db.get(MembershipArrear, payment.arrear_id)
+                if ar:
+                    arrear_year_for_email = ar.year
+        elif payment.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION):
             await self._activate_subscription(payment, now)
         elif payment.product_type == ProductType.EVENT:
             await self._confirm_event_registration(payment)
@@ -184,7 +204,13 @@ class PaymentWebhookService:
         email = email_result.scalar_one_or_none()
         receipt_url = receipt_obj.get("receipt_url") if receipt_obj else None
         if email:
-            if payment.product_type == ProductType.EVENT:
+            if payment.product_type == ProductType.MEMBERSHIP_ARREARS:
+                await send_arrear_paid_notification.kiq(
+                    email,
+                    float(payment.amount),
+                    arrear_year_for_email or 0,
+                )
+            elif payment.product_type == ProductType.EVENT:
                 await self._send_event_email(payment, email, receipt_url)
             else:
                 await send_payment_succeeded_notification.kiq(
@@ -195,7 +221,7 @@ class PaymentWebhookService:
             await notify_admin_payment_received.kiq(
                 email, float(payment.amount), payment.product_type
             )
-            if send_user_telegram:
+            if send_user_telegram and payment.product_type != ProductType.MEMBERSHIP_ARREARS:
                 from app.tasks.telegram_tasks import notify_user_payment_succeeded
 
                 await notify_user_payment_succeeded.kiq(
@@ -210,21 +236,24 @@ class PaymentWebhookService:
         if not sub:
             return
 
-        plan = await self.db.get(Plan, sub.plan_id)
-        duration_months = plan.duration_months if plan else 12
-
         if sub.status != SubscriptionStatus.ACTIVE:
             sub.status = SubscriptionStatus.ACTIVE
 
-        from dateutil.relativedelta import relativedelta
+        now_msk = now.astimezone(_MSK) if now.tzinfo else now.replace(tzinfo=UTC).astimezone(_MSK)
 
         prev_end = sub.ends_at
-        if prev_end and prev_end > now:
+        if prev_end is not None:
+            prev_cmp = prev_end if prev_end.tzinfo else prev_end.replace(tzinfo=UTC)
+            prev_msk = prev_cmp.astimezone(_MSK)
+        else:
+            prev_msk = None
+
+        if prev_msk and prev_msk > now_msk:
             sub.starts_at = sub.starts_at or now
-            sub.ends_at = prev_end + relativedelta(months=duration_months)
+            sub.ends_at = _end_of_calendar_year_msk(prev_msk.year + 1)
         else:
             sub.starts_at = now
-            sub.ends_at = now + relativedelta(months=duration_months)
+            sub.ends_at = _end_of_calendar_year_msk(now_msk.year)
 
         dp_result = await self.db.execute(
             select(DoctorProfile).where(DoctorProfile.user_id == payment.user_id)

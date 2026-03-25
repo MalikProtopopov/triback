@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db_session
 from app.core.openapi import error_responses
 from app.core.security import require_role
+from app.models.arrears import MembershipArrear
 from app.models.events import Event
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment, Subscription
@@ -30,6 +31,12 @@ class DashboardResponse(BaseModel):
     payment_total_year: float
     upcoming_events: int
     moderation_queue: int
+    arrears_open_total: float
+    arrears_open_count: int
+    arrears_paid_total: float
+    arrears_paid_count: int
+    arrears_waived_total: float
+    arrears_waived_count: int
 
 
 @router.get(
@@ -126,6 +133,31 @@ async def get_dashboard(
 
     moderation_queue = pending_review
 
+    arrears_open_row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(MembershipArrear.amount), 0),
+                func.count(MembershipArrear.id),
+            ).where(MembershipArrear.status == "open")
+        )
+    ).one()
+    arrears_paid_row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(MembershipArrear.amount), 0),
+                func.count(MembershipArrear.id),
+            ).where(MembershipArrear.status == "paid")
+        )
+    ).one()
+    arrears_waived_row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(MembershipArrear.amount), 0),
+                func.count(MembershipArrear.id),
+            ).where(MembershipArrear.status == "waived")
+        )
+    ).one()
+
     return {
         "total_users": total_users,
         "total_doctors": total_doctors,
@@ -137,4 +169,10 @@ async def get_dashboard(
         "payment_total_year": float(payment_year),
         "upcoming_events": upcoming_events,
         "moderation_queue": moderation_queue,
+        "arrears_open_total": float(arrears_open_row[0] or 0),
+        "arrears_open_count": int(arrears_open_row[1] or 0),
+        "arrears_paid_total": float(arrears_paid_row[0] or 0),
+        "arrears_paid_count": int(arrears_paid_row[1] or 0),
+        "arrears_waived_total": float(arrears_waived_row[0] or 0),
+        "arrears_waived_count": int(arrears_waived_row[1] or 0),
     }

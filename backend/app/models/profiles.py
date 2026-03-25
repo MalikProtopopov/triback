@@ -85,6 +85,12 @@ class DoctorProfile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         DateTime(timezone=True), nullable=True
     )
     board_role: Mapped[str | None] = mapped_column(BoardRole, nullable=True)
+    entry_fee_exempt: Mapped[bool] = mapped_column(
+        Boolean, server_default="false", nullable=False
+    )
+    membership_excluded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="doctor_profile")  # type: ignore[name-defined]  # noqa: F821
     city: Mapped["City | None"] = relationship()  # type: ignore[name-defined]  # noqa: F821

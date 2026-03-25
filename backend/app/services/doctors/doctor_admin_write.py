@@ -18,7 +18,11 @@ from app.core.security import hash_password
 from app.core.utils import generate_unique_slug
 from app.models.profiles import DoctorProfile
 from app.models.users import Role, User, UserRoleAssignment
-from app.schemas.doctor_admin import AdminCreateDoctorResponse, DoctorDetailResponse
+from app.schemas.doctor_admin import (
+    AdminCreateDoctorResponse,
+    DoctorDetailResponse,
+    DoctorPaymentOverridesRequest,
+)
 from app.services.doctors.doctor_admin_read import DoctorAdminRead
 from app.tasks.email_tasks import send_doctor_invite_email
 
@@ -118,6 +122,15 @@ class DoctorAdminWrite:
     ) -> DoctorDetailResponse:
         dp = await self._get_profile_or_404(profile_id)
         dp.board_role = board_role
+        await self.db.commit()
+        await self.db.refresh(dp)
+        return await self._read.get_doctor(profile_id)
+
+    async def update_payment_overrides(
+        self, profile_id: UUID, body: DoctorPaymentOverridesRequest
+    ) -> DoctorDetailResponse:
+        dp = await self._get_profile_or_404(profile_id)
+        dp.entry_fee_exempt = body.entry_fee_exempt
         await self.db.commit()
         await self.db.refresh(dp)
         return await self._read.get_doctor(profile_id)

@@ -89,6 +89,14 @@ class ProductType(StrEnum):
     ENTRY_FEE = "entry_fee"
     SUBSCRIPTION = "subscription"
     EVENT = "event"
+    MEMBERSHIP_ARREARS = "membership_arrears"
+
+
+class ArrearStatus(StrEnum):
+    OPEN = "open"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+    WAIVED = "waived"
 
 
 class PaymentProviderEnum(StrEnum):

@@ -18,6 +18,11 @@ from app.schemas.public import DoctorPublicDetailResponse, DoctorPublicListItem,
 from app.schemas.shared import ContentBlockPublicNested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
+from app.services.membership_arrears_service import (
+    arrears_block_enabled,
+    correlated_open_arrears_exist,
+    load_site_settings_dict,
+)
 
 
 def _has_active_subscription() -> Any:
@@ -51,14 +56,21 @@ class DoctorCatalogService:
         board_role: list[str] | None = None,
         search: str | None = None,
     ) -> dict[str, Any]:
+        settings_data = await load_site_settings_dict(self.db)
+        block_arrears = arrears_block_enabled(settings_data)
         active_sub = _has_active_subscription()
+        visible = (
+            and_(active_sub, ~correlated_open_arrears_exist())
+            if block_arrears
+            else active_sub
+        )
         base = (
             select(DoctorProfile)
             .options(joinedload(DoctorProfile.city))
-            .where(DoctorProfile.status == DoctorStatus.ACTIVE, active_sub)
+            .where(DoctorProfile.status == DoctorStatus.ACTIVE, visible)
         )
         count_q = select(func.count(DoctorProfile.id)).where(
-            DoctorProfile.status == DoctorStatus.ACTIVE, active_sub
+            DoctorProfile.status == DoctorStatus.ACTIVE, visible
         )
 
         filters: list[Any] = []
@@ -121,10 +133,25 @@ class DoctorCatalogService:
         except (ValueError, AttributeError):
             id_filter = DoctorProfile.slug == identifier
 
+        settings_data = await load_site_settings_dict(self.db)
+        block_arrears = arrears_block_enabled(settings_data)
+        active_sub = _has_active_subscription()
+        visible = (
+            and_(active_sub, ~correlated_open_arrears_exist())
+            if block_arrears
+            else active_sub
+        )
+
         result = await self.db.execute(
             select(DoctorProfile)
             .options(joinedload(DoctorProfile.city))
-            .where(and_(id_filter, DoctorProfile.status == DoctorStatus.ACTIVE, _has_active_subscription()))
+            .where(
+                and_(
+                    id_filter,
+                    DoctorProfile.status == DoctorStatus.ACTIVE,
+                    visible,
+                )
+            )
         )
         dp = result.unique().scalar_one_or_none()
         if not dp:

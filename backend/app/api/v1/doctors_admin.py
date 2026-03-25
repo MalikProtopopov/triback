@@ -19,6 +19,7 @@ from app.schemas.doctor_admin import (
     ApproveDraftRequest,
     DoctorBoardRoleUpdateRequest,
     DoctorDetailResponse,
+    DoctorPaymentOverridesRequest,
     DoctorListItemResponse,
     ImportStartResponse,
     ImportStatusResponse,
@@ -37,6 +38,7 @@ router = APIRouter(prefix="/admin")
 
 ADMIN_MANAGER = require_role("admin", "manager")
 ADMIN_ONLY = require_role("admin")
+ADMIN_ACCOUNTANT = require_role("admin", "accountant")
 
 
 @router.get(
@@ -119,6 +121,23 @@ async def update_doctor_board_role(
     """
     svc = DoctorAdminService(db)
     return await svc.update_board_role(profile_id, body.board_role)
+
+
+@router.patch(
+    "/doctors/{profile_id}/payment-overrides",
+    response_model=DoctorDetailResponse,
+    summary="Оверрайды оплаты (вступительный взнос)",
+    responses=error_responses(401, 403, 404),
+)
+async def update_doctor_payment_overrides(
+    profile_id: UUID,
+    body: DoctorPaymentOverridesRequest,
+    payload: dict[str, Any] = ADMIN_ACCOUNTANT,
+    db: AsyncSession = Depends(get_db_session),
+) -> DoctorDetailResponse:
+    """Устанавливает `entry_fee_exempt` для миграции и ручных случаев."""
+    svc = DoctorAdminService(db)
+    return await svc.update_payment_overrides(profile_id, body)
 
 
 @router.get(

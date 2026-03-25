@@ -10,11 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.enums import PaymentStatus, ProductType, SubscriptionStatus
+from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment, Subscription
 from app.services.payment_utils import LAPSE_THRESHOLD_DAYS
 
 
+async def is_entry_fee_exempt(db: AsyncSession, user_id: UUID) -> bool:
+    row = await db.execute(
+        select(DoctorProfile.entry_fee_exempt).where(DoctorProfile.user_id == user_id)
+    )
+    v = row.scalar_one_or_none()
+    return bool(v)
+
+
 async def determine_product_type(db: AsyncSession, user_id: UUID) -> str:
+    if await is_entry_fee_exempt(db, user_id):
+        return ProductType.SUBSCRIPTION
+
     result = await db.execute(
         select(Subscription)
         .where(Subscription.user_id == user_id)

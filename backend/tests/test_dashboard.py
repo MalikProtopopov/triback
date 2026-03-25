@@ -38,3 +38,5 @@ async def test_dashboard_returns_metrics(
     data = resp.json()
     assert "active_doctors" in data
     assert "active_subscriptions" in data
+    assert data.get("arrears_waived_total") == 0
+    assert data.get("arrears_waived_count") == 0

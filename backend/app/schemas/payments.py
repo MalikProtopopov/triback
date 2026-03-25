@@ -49,10 +49,11 @@ class PaymentListResponse(BaseModel):
 class ManualPaymentRequest(BaseModel):
     user_id: UUID
     amount: float = Field(gt=0)
-    product_type: Literal["entry_fee", "subscription", "event"]
+    product_type: Literal["entry_fee", "subscription", "event", "membership_arrears"]
     description: str
     subscription_id: UUID | None = None
     event_registration_id: UUID | None = None
+    arrear_id: UUID | None = None
 
 
 class ManualPaymentResponse(BaseModel):

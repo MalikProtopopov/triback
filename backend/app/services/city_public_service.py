@@ -16,6 +16,11 @@ from app.models.cities import City
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Subscription
 from app.schemas.public import CityResponse, CityWithDoctorsResponse
+from app.services.membership_arrears_service import (
+    arrears_block_enabled,
+    correlated_open_arrears_exist,
+    load_site_settings_dict,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -42,6 +47,14 @@ class CityPublicService:
     def __init__(self, db: AsyncSession, redis: Redis) -> None:
         self.db = db
         self.redis = redis
+
+    async def _doctor_visibility_expr(self) -> Any:
+        settings_data = await load_site_settings_dict(self.db)
+        block = arrears_block_enabled(settings_data)
+        active_sub = _has_active_subscription()
+        if block:
+            return and_(active_sub, ~correlated_open_arrears_exist())
+        return active_sub
 
     async def list_cities(self, *, with_doctors: bool = False) -> dict[str, Any]:
         cache_key = f"cache:cities:{with_doctors}"
@@ -71,9 +84,10 @@ class CityPublicService:
         ]
 
     async def _cities_with_doctors(self) -> list[dict[str, Any]]:
+        visible = await self._doctor_visibility_expr()
         doctor_count = (
             func.count(DoctorProfile.id)
-            .filter(DoctorProfile.status == DoctorStatus.ACTIVE, _has_active_subscription())
+            .filter(DoctorProfile.status == DoctorStatus.ACTIVE, visible)
             .label("doctors_count")
         )
         q = (
@@ -93,9 +107,10 @@ class CityPublicService:
         ]
 
     async def get_city(self, slug: str) -> CityWithDoctorsResponse:
+        visible = await self._doctor_visibility_expr()
         doctor_count = (
             func.count(DoctorProfile.id)
-            .filter(DoctorProfile.status == DoctorStatus.ACTIVE, _has_active_subscription())
+            .filter(DoctorProfile.status == DoctorStatus.ACTIVE, visible)
             .label("doctors_count")
         )
         q = (

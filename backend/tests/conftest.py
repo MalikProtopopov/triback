@@ -58,6 +58,8 @@ def pytest_configure(config: pytest.Config) -> None:
                 END $$;
                 """)
             )
+            # Breaks circular FK: payments.arrear_id ↔ membership_arrears.payment_id
+            await conn.execute(text("DROP TABLE IF EXISTS membership_arrears CASCADE"))
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         await eng.dispose()

@@ -40,6 +40,11 @@ class SubscriptionService:
     async def pay(self, user_id: UUID, plan_id: UUID, idempotency_key: str) -> PayResponse:
         return await self._pay.pay(user_id, plan_id, idempotency_key)
 
+    async def pay_arrear(
+        self, user_id: UUID, arrear_id: UUID, idempotency_key: str
+    ) -> PayResponse:
+        return await self._pay.pay_arrear(user_id, arrear_id, idempotency_key)
+
     async def get_status(self, user_id: UUID) -> SubscriptionStatusResponse:
         return await self._sub_status.get_status(user_id)
 

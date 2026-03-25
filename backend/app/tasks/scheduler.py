@@ -89,6 +89,12 @@ async def start_scheduler() -> None:
             name="sched_close_voting",
         )
     )
+    _scheduler_tasks.append(
+        asyncio.create_task(
+            _run_periodic("arrears_auto_accrual", arrears_auto_accrual_job, 86400),
+            name="sched_arrears_accrual",
+        )
+    )
     logger.info("scheduler_started", tasks=len(_scheduler_tasks))
 
 
@@ -99,6 +105,26 @@ async def stop_scheduler() -> None:
     await asyncio.gather(*_scheduler_tasks, return_exceptions=True)
     _scheduler_tasks.clear()
     logger.info("scheduler_stopped")
+
+
+@broker.task
+async def arrears_auto_accrual_job() -> int:
+    """Daily stub: when ``arrears_auto_accrual_enabled`` is on, real accrual will run here."""
+    from app.core.database import AsyncSessionLocal
+    from app.services.membership_arrears_service import load_site_settings_dict
+
+    async with AsyncSessionLocal() as db:
+        data = await load_site_settings_dict(db)
+        raw = data.get("arrears_auto_accrual_enabled")
+        enabled = raw is True or (
+            isinstance(raw, str) and raw.lower() in ("true", "1", "yes")
+        )
+        if isinstance(raw, dict) and raw.get("enabled") is True:
+            enabled = True
+        if not enabled:
+            return 0
+    logger.info("arrears_auto_accrual_stub_noop")
+    return 0
 
 
 @broker.task

@@ -391,4 +391,6 @@ class DoctorAdminRead:
             tg_username=tg_binding.tg_username if tg_binding else None,
             board_role=dp.board_role,
             created_at=dp.created_at,
+            entry_fee_exempt=bool(dp.entry_fee_exempt),
+            membership_excluded_at=dp.membership_excluded_at,
         )

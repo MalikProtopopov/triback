@@ -12,6 +12,7 @@ from app.core.openapi import error_responses
 from app.core.redis import get_redis
 from app.core.security import require_role
 from app.schemas.subscriptions import (
+    PayArrearRequest,
     PaymentStatusResponse,
     PayRequest,
     PayResponse,
@@ -54,6 +55,25 @@ async def pay_subscription(
     user_id = UUID(payload["sub"])
     svc = SubscriptionService(db, redis)
     return await svc.pay(user_id, body.plan_id, body.idempotency_key)
+
+
+@router.post(
+    "/pay-arrears",
+    response_model=PayResponse,
+    status_code=201,
+    summary="Оплата задолженности по членскому взносу",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+async def pay_arrear(
+    body: PayArrearRequest,
+    payload: dict[str, Any] = DOCTOR,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> PayResponse:
+    """Создаёт платёж на сумму открытой задолженности и возвращает URL оплаты."""
+    user_id = UUID(payload["sub"])
+    svc = SubscriptionService(db, redis)
+    return await svc.pay_arrear(user_id, body.arrear_id, body.idempotency_key)
 
 
 @router.get(

@@ -359,3 +359,45 @@ async def send_event_ticket_purchased(
         f"{_button(events_url, 'Мои мероприятия')}"
     )
     await send_smtp_email(email, f"Билет: {_esc(event_title)} — {_BRAND}", body)
+
+
+@broker.task
+async def send_arrear_created_notification(
+    user_id: str, year: int, amount: float
+) -> None:
+    from uuid import UUID
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.users import User
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User.email).where(User.id == UUID(user_id)))
+        email = r.scalar_one_or_none()
+    if not email:
+        logger.warning("send_arrear_created_no_email", user_id=user_id[:16])
+        return
+    body = _wrap_html(
+        f"<h2 style='margin:0 0 16px;color:#1A1D23;font-family:\"Plus Jakarta Sans\",Arial,sans-serif;'>"
+        f"Задолженность по членскому взносу</h2>"
+        f"<p style='color:#5F6B7A;line-height:1.6;'>Вам начислена задолженность за <strong>{year}</strong> год "
+        f"на сумму <strong>{amount:.2f} ₽</strong>. Оплатить можно в личном кабинете.</p>"
+        f"{_button(_BASE_URL + '/subscription', 'Перейти в личный кабинет')}"
+    )
+    await send_smtp_email(
+        email, f"Задолженность {year} г. — {_BRAND}", body
+    )
+
+
+@broker.task
+async def send_arrear_paid_notification(
+    email: str, amount: float, year: int
+) -> None:
+    body = _wrap_html(
+        f"<h2 style='margin:0 0 16px;color:#1A1D23;font-family:\"Plus Jakarta Sans\",Arial,sans-serif;'>"
+        f"Задолженность погашена</h2>"
+        f"<p style='color:#5F6B7A;line-height:1.6;'>Мы получили оплату задолженности"
+        f"{f' за {year} год' if year else ''} на сумму <strong>{amount:.2f} ₽</strong>.</p>"
+    )
+    await send_smtp_email(email, f"Оплата задолженности — {_BRAND}", body)

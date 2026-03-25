@@ -103,7 +103,17 @@ ProductType = SAEnum(
     "entry_fee",
     "subscription",
     "event",
+    "membership_arrears",
     name="product_type",
+    native_enum=True,
+)
+
+ArrearStatus = SAEnum(
+    "open",
+    "paid",
+    "cancelled",
+    "waived",
+    name="arrear_status",
     native_enum=True,
 )
 

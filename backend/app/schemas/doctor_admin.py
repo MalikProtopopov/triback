@@ -147,12 +147,20 @@ class DoctorDetailResponse(BaseModel):
     tg_username: str | None = None
     board_role: str | None = None
     created_at: datetime
+    entry_fee_exempt: bool = False
+    membership_excluded_at: datetime | None = None
 
 
 # ── Board role update ─────────────────────────────────────────────
 
 class DoctorBoardRoleUpdateRequest(BaseModel):
     board_role: Literal["pravlenie", "president"] | None = None
+
+
+class DoctorPaymentOverridesRequest(BaseModel):
+    """Ручные оверрайды оплаты (миграция / бухгалтерия)."""
+
+    entry_fee_exempt: bool
 
 
 # ── Moderation actions ────────────────────────────────────────────

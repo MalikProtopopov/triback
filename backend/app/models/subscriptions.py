@@ -106,6 +106,7 @@ class Payment(Base, UUIDMixin, TimestampMixin):
         ),
         Index("idx_payments_subscription", "subscription_id"),
         Index("idx_payments_event_reg", "event_registration_id"),
+        Index("idx_payments_arrear_id", "arrear_id"),
         Index("idx_payments_created_at", "created_at"),
         Index(
             "idx_payments_moneta_op",
@@ -130,6 +131,9 @@ class Payment(Base, UUIDMixin, TimestampMixin):
     )
     event_registration_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("event_registrations.id", ondelete="SET NULL")
+    )
+    arrear_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("membership_arrears.id", ondelete="SET NULL")
     )
     external_payment_id: Mapped[str | None] = mapped_column(String(255))
     external_payment_url: Mapped[str | None] = mapped_column(String(1000))

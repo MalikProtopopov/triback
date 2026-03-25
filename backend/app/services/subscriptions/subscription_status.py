@@ -10,11 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.enums import SubscriptionStatus
+from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Plan, Subscription
 from app.schemas.subscriptions import (
+    ArrearNested,
     CurrentSubscriptionNested,
     PlanNested,
     SubscriptionStatusResponse,
+)
+from app.services.membership_arrears_service import (
+    arrears_block_enabled,
+    list_open_arrears_for_user,
+    load_site_settings_dict,
 )
 from app.services.payment_utils import LAPSE_THRESHOLD_DAYS
 from app.services.subscriptions import subscription_helpers as sub_helpers
@@ -25,6 +32,42 @@ class SubscriptionUserStatusService:
         self.db = db
 
     async def get_status(self, user_id: UUID) -> SubscriptionStatusResponse:
+        settings_data = await load_site_settings_dict(self.db)
+        block_by_arrears = arrears_block_enabled(settings_data)
+
+        dp_row = await self.db.execute(
+            select(
+                DoctorProfile.entry_fee_exempt,
+                DoctorProfile.membership_excluded_at,
+            ).where(DoctorProfile.user_id == user_id)
+        )
+        dp_extras = dp_row.one_or_none()
+        entry_fee_exempt = bool(dp_extras and dp_extras[0])
+        membership_excluded_at = dp_extras[1] if dp_extras else None
+
+        open_rows = await list_open_arrears_for_user(self.db, user_id)
+        open_arrears = [
+            ArrearNested(
+                id=a.id,
+                year=a.year,
+                amount=float(a.amount),
+                description=a.description,
+                source=str(a.source),
+                escalation_level=a.escalation_level,
+            )
+            for a in open_rows
+        ]
+        arrears_total = float(sum(x.amount for x in open_arrears))
+        arrears_block_active = bool(block_by_arrears and open_arrears)
+        is_excluded = membership_excluded_at is not None
+        arrears_kw = {
+            "open_arrears": open_arrears,
+            "arrears_total": arrears_total,
+            "arrears_block_active": arrears_block_active,
+            "is_membership_excluded": is_excluded,
+            "membership_excluded_at": membership_excluded_at,
+        }
+
         result = await self.db.execute(
             select(Subscription)
             .options(joinedload(Subscription.plan))
@@ -35,9 +78,9 @@ class SubscriptionUserStatusService:
         latest = result.scalar_one_or_none()
 
         has_entry = await sub_helpers.has_paid_entry_fee(self.db, user_id)
-        entry_fee_required = not has_entry
+        entry_fee_required = not has_entry and not entry_fee_exempt
 
-        if has_entry and latest and latest.ends_at:
+        if has_entry and latest and latest.ends_at and not entry_fee_exempt:
             now = datetime.now(UTC)
             if latest.ends_at.tzinfo is None:
                 lapse = now.replace(tzinfo=None) - latest.ends_at
@@ -94,6 +137,7 @@ class SubscriptionUserStatusService:
                 entry_fee_required=entry_fee_required,
                 entry_fee_plan=entry_fee_plan,
                 available_plans=available_plans,
+                **arrears_kw,
             )
 
         now = datetime.now(UTC)
@@ -158,4 +202,5 @@ class SubscriptionUserStatusService:
             entry_fee_required=entry_fee_required,
             entry_fee_plan=entry_fee_plan,
             available_plans=available_plans,
+            **arrears_kw,
         )

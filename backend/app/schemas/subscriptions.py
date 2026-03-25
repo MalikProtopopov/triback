@@ -18,6 +18,11 @@ class PayRequest(BaseModel):
     })
 
 
+class PayArrearRequest(BaseModel):
+    arrear_id: UUID
+    idempotency_key: str
+
+
 class PayResponse(BaseModel):
     payment_id: UUID
     payment_url: str
@@ -41,6 +46,15 @@ class PlanNested(BaseModel):
     plan_type: str = "subscription"
     price: float = 0
     duration_months: int = 12
+
+
+class ArrearNested(BaseModel):
+    id: UUID
+    year: int
+    amount: float
+    description: str
+    source: str = "manual"
+    escalation_level: str | None = None
 
 
 class CurrentSubscriptionNested(BaseModel):
@@ -151,6 +165,11 @@ class SubscriptionStatusResponse(BaseModel):
     entry_fee_required: bool = False
     entry_fee_plan: PlanNested | None = None
     available_plans: list[PlanNested] = []
+    open_arrears: list[ArrearNested] = []
+    arrears_total: float = 0.0
+    arrears_block_active: bool = False
+    is_membership_excluded: bool = False
+    membership_excluded_at: datetime | None = None
 
     model_config = ConfigDict(json_schema_extra={
         "example": {

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.doctor_admin import (
     AdminCreateDoctorResponse,
     DoctorDetailResponse,
+    DoctorPaymentOverridesRequest,
     ImportStatusResponse,
     PortalUserDetailResponse,
 )
@@ -49,6 +50,11 @@ class DoctorAdminService:
         self, profile_id: UUID, board_role: str | None
     ) -> DoctorDetailResponse:
         return await self._crud.update_board_role(profile_id, board_role)
+
+    async def update_payment_overrides(
+        self, profile_id: UUID, body: DoctorPaymentOverridesRequest
+    ) -> DoctorDetailResponse:
+        return await self._crud.update_payment_overrides(profile_id, body)
 
     # ── Moderation ────────────────────────────────────────────────
 

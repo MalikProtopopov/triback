@@ -7,7 +7,11 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.doctor_admin import AdminCreateDoctorResponse, DoctorDetailResponse
+from app.schemas.doctor_admin import (
+    AdminCreateDoctorResponse,
+    DoctorDetailResponse,
+    DoctorPaymentOverridesRequest,
+)
 from app.services.doctors.doctor_admin_read import DoctorAdminRead
 from app.services.doctors.doctor_admin_write import DoctorAdminWrite
 
@@ -31,3 +35,8 @@ class DoctorCrudService:
         self, profile_id: UUID, board_role: str | None
     ) -> DoctorDetailResponse:
         return await self._write.update_board_role(profile_id, board_role)
+
+    async def update_payment_overrides(
+        self, profile_id: UUID, body: DoctorPaymentOverridesRequest
+    ) -> DoctorDetailResponse:
+        return await self._write.update_payment_overrides(profile_id, body)

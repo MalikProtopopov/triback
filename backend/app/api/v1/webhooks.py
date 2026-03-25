@@ -118,10 +118,15 @@ async def _collect_moneta_params(request: Request) -> dict[str, str]:
     return params
 
 
-@router.api_route(
+@router.get(
     "/moneta",
-    methods=["GET", "POST"],
     summary="Moneta Pay URL webhook",
+    operation_id="moneta_pay_webhook_get",
+)
+@router.post(
+    "/moneta",
+    summary="Moneta Pay URL webhook",
+    operation_id="moneta_pay_webhook_post",
 )
 async def moneta_pay_webhook(
     request: Request,
@@ -244,10 +249,15 @@ async def moneta_pay_webhook(
 # ------------------------------------------------------------------
 
 
-@router.api_route(
+@router.get(
     "/moneta/check",
-    methods=["GET", "POST"],
     summary="Moneta Check URL",
+    operation_id="moneta_check_webhook_get",
+)
+@router.post(
+    "/moneta/check",
+    summary="Moneta Check URL",
+    operation_id="moneta_check_webhook_post",
 )
 async def moneta_check_webhook(
     request: Request,

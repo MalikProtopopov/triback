@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from app.api.v1.arrears_admin import router as arrears_admin_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.certificates import router as certificates_router
 from app.api.v1.certificates_admin import router as certificates_admin_router
@@ -44,6 +45,7 @@ router.include_router(telegram_admin_router, tags=["Admin - Telegram"])
 router.include_router(certificates_admin_router, tags=["Admin - Certificates"])
 router.include_router(doctors_admin_router, tags=["Admin - Doctors"])
 router.include_router(payments_admin_router, tags=["Admin - Payments"])
+router.include_router(arrears_admin_router, tags=["Admin - Arrears"])
 router.include_router(dashboard_router, tags=["Admin - Dashboard"])
 router.include_router(notifications_admin_router, tags=["Admin - Notifications"])
 router.include_router(seo_admin_router, tags=["Admin - SEO"])

@@ -14,6 +14,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core.enums import PaymentStatus, ProductType
 from app.core.exceptions import AppValidationError, NotFoundError
+from app.models.arrears import MembershipArrear
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Payment
 from app.schemas.payments import (
@@ -26,6 +27,7 @@ from app.schemas.payments import (
 )
 from app.services.payment_providers import get_provider
 from app.services.payment_user_service import _payment_url_if_active
+from app.services.membership_arrears_service import mark_arrear_paid_from_payment
 from app.services.payment_webhook_service import PaymentWebhookService
 from app.tasks.email_tasks import send_payment_succeeded_notification
 
@@ -159,6 +161,23 @@ class PaymentAdminService:
 
         now = datetime.now(UTC)
 
+        if body.product_type == ProductType.MEMBERSHIP_ARREARS:
+            if not body.arrear_id:
+                raise AppValidationError("arrear_id обязателен для membership_arrears")
+            if body.subscription_id or body.event_registration_id:
+                raise AppValidationError(
+                    "subscription_id и event_registration_id не используются для задолженности"
+                )
+            ar = await self.db.get(MembershipArrear, body.arrear_id)
+            if not ar or ar.user_id != body.user_id:
+                raise NotFoundError("Задолженность не найдена")
+            if ar.status != "open":
+                raise AppValidationError("Задолженность не в статусе open")
+            if Decimal(str(body.amount)) != ar.amount:
+                raise AppValidationError("Сумма должна совпадать с задолженностью")
+        elif body.arrear_id:
+            raise AppValidationError("arrear_id допустим только для membership_arrears")
+
         payment = Payment(
             user_id=body.user_id,
             amount=body.amount,
@@ -167,13 +186,16 @@ class PaymentAdminService:
             status=PaymentStatus.SUCCEEDED,
             subscription_id=body.subscription_id,
             event_registration_id=body.event_registration_id,
+            arrear_id=body.arrear_id,
             description=body.description,
             paid_at=now,
         )
         self.db.add(payment)
         await self.db.flush()
 
-        if body.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION) and body.subscription_id:
+        if body.product_type == ProductType.MEMBERSHIP_ARREARS:
+            await mark_arrear_paid_from_payment(self.db, payment, now)
+        elif body.product_type in (ProductType.ENTRY_FEE, ProductType.SUBSCRIPTION) and body.subscription_id:
             webhook_svc = PaymentWebhookService(self.db)
             await webhook_svc._activate_subscription(payment, now)
 
