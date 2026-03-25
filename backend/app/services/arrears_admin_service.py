@@ -7,22 +7,46 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.models.arrears import MembershipArrear
-from app.models.users import User
+from app.models.profiles import DoctorProfile
+from app.models.users import TelegramBinding, User
 from app.schemas.arrears import (
     ArrearCreateRequest,
     ArrearListResponse,
     ArrearResponse,
     ArrearSummaryResponse,
     ArrearUpdateRequest,
+    ArrearUserNested,
 )
 
 
-def _to_response(a: MembershipArrear) -> ArrearResponse:
+def _format_full_name(dp: DoctorProfile | None) -> str | None:
+    if not dp:
+        return None
+    parts = [dp.last_name, dp.first_name, dp.middle_name]
+    joined = " ".join(p.strip() for p in parts if p and str(p).strip())
+    return joined or None
+
+
+def _user_to_nested(
+    u: User, dp: DoctorProfile | None, tg: TelegramBinding | None
+) -> ArrearUserNested:
+    return ArrearUserNested(
+        id=u.id,
+        email=u.email,
+        full_name=_format_full_name(dp),
+        phone=dp.phone if dp else None,
+        telegram_username=tg.tg_username if tg and tg.tg_username else None,
+    )
+
+
+def _to_response(
+    a: MembershipArrear, user: ArrearUserNested | None = None
+) -> ArrearResponse:
     return ArrearResponse(
         id=a.id,
         user_id=a.user_id,
@@ -41,12 +65,33 @@ def _to_response(a: MembershipArrear) -> ArrearResponse:
         waive_reason=a.waive_reason,
         created_at=a.created_at,
         updated_at=a.updated_at,
+        user=user,
     )
 
 
 class ArrearsAdminService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def _load_user_nested(self, user_id: UUID) -> ArrearUserNested:
+        stmt = (
+            select(User, DoctorProfile, TelegramBinding)
+            .select_from(User)
+            .where(User.id == user_id)
+            .outerjoin(DoctorProfile, DoctorProfile.user_id == User.id)
+            .outerjoin(TelegramBinding, TelegramBinding.user_id == User.id)
+        )
+        row = (await self.db.execute(stmt)).one_or_none()
+        if not row:
+            return ArrearUserNested(
+                id=user_id,
+                email="",
+                full_name=None,
+                phone=None,
+                telegram_username=None,
+            )
+        u, dp, tg = row
+        return _user_to_nested(u, dp, tg)
 
     async def list_arrears(
         self,
@@ -59,7 +104,6 @@ class ArrearsAdminService:
         source: str | None = None,
         include_inactive: bool = True,
     ) -> ArrearListResponse:
-        q = select(MembershipArrear)
         count_q = select(func.count(MembershipArrear.id))
         filters: list[Any] = []
         if user_id:
@@ -73,13 +117,23 @@ class ArrearsAdminService:
         if source:
             filters.append(MembershipArrear.source == source)
         if filters:
-            q = q.where(and_(*filters))
             count_q = count_q.where(and_(*filters))
         total = (await self.db.execute(count_q)).scalar() or 0
+        q = (
+            select(MembershipArrear, User, DoctorProfile, TelegramBinding)
+            .join(User, MembershipArrear.user_id == User.id)
+            .outerjoin(DoctorProfile, DoctorProfile.user_id == User.id)
+            .outerjoin(TelegramBinding, TelegramBinding.user_id == User.id)
+        )
+        if filters:
+            q = q.where(and_(*filters))
         q = q.order_by(MembershipArrear.created_at.desc()).offset(offset).limit(limit)
-        rows = (await self.db.execute(q)).scalars().all()
+        rows = (await self.db.execute(q)).all()
         return ArrearListResponse(
-            data=[_to_response(a) for a in rows],
+            data=[
+                _to_response(a, _user_to_nested(u, dp, tg))
+                for a, u, dp, tg in rows
+            ],
             total=total,
             limit=limit,
             offset=offset,
@@ -149,7 +203,8 @@ class ArrearsAdminService:
         from app.tasks.email_tasks import send_arrear_created_notification
 
         await send_arrear_created_notification.kiq(str(body.user_id), body.year, float(body.amount))
-        return _to_response(a)
+        un = await self._load_user_nested(a.user_id)
+        return _to_response(a, un)
 
     async def update(
         self, arrear_id: UUID, body: ArrearUpdateRequest
@@ -167,7 +222,8 @@ class ArrearsAdminService:
             a.admin_note = body.admin_note
         await self.db.commit()
         await self.db.refresh(a)
-        return _to_response(a)
+        un = await self._load_user_nested(a.user_id)
+        return _to_response(a, un)
 
     async def cancel(self, arrear_id: UUID) -> ArrearResponse:
         a = await self.db.get(MembershipArrear, arrear_id)
@@ -178,7 +234,8 @@ class ArrearsAdminService:
         a.status = "cancelled"
         await self.db.commit()
         await self.db.refresh(a)
-        return _to_response(a)
+        un = await self._load_user_nested(a.user_id)
+        return _to_response(a, un)
 
     async def waive(
         self, arrear_id: UUID, admin_id: UUID, waive_reason: str | None
@@ -195,7 +252,8 @@ class ArrearsAdminService:
         a.waive_reason = waive_reason
         await self.db.commit()
         await self.db.refresh(a)
-        return _to_response(a)
+        un = await self._load_user_nested(a.user_id)
+        return _to_response(a, un)
 
     async def mark_paid_manual(self, arrear_id: UUID) -> ArrearResponse:
         a = await self.db.get(MembershipArrear, arrear_id)
@@ -208,4 +266,5 @@ class ArrearsAdminService:
         a.paid_at = now
         await self.db.commit()
         await self.db.refresh(a)
-        return _to_response(a)
+        un = await self._load_user_nested(a.user_id)
+        return _to_response(a, un)

@@ -23,6 +23,16 @@ class ArrearUpdateRequest(BaseModel):
     admin_note: str | None = None
 
 
+class ArrearUserNested(BaseModel):
+    """User snapshot for admin arrears list/detail (ФИО из профиля врача, если есть)."""
+
+    id: UUID
+    email: str
+    full_name: str | None = None
+    phone: str | None = None
+    telegram_username: str | None = None
+
+
 class ArrearResponse(BaseModel):
     id: UUID
     user_id: UUID
@@ -41,6 +51,7 @@ class ArrearResponse(BaseModel):
     waive_reason: str | None
     created_at: datetime
     updated_at: datetime
+    user: ArrearUserNested | None = None
 
 
 class ArrearListResponse(BaseModel):

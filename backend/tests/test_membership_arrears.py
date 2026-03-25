@@ -379,3 +379,8 @@ async def test_list_arrears_include_inactive_false_only_open(
     assert len(all_rows.data) == 2
     assert len(only_open.data) == 1
     assert only_open.data[0].status == "open"
+    row0 = only_open.data[0]
+    assert row0.user is not None
+    assert row0.user.email
+    assert row0.user.full_name == "Doctor Test"
+    assert row0.user.phone == "+79001234567"
