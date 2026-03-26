@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Засев трёх документов организации из docs/seed/*.rtf в таблицу organization_documents.
+"""Засев трёх документов организации из RTF в таблицу organization_documents.
+
+Файлы ищутся в scripts/data/org_docs/ (копия для Docker-образа) или в docs/seed/ у корня репозитория.
 
 Содержимое файлов кладётся в поле content (RTF как текст). При повторном запуске записи
 обновляются по slug (slug строится из названия).
@@ -33,10 +35,7 @@ from app.core.utils import slugify
 from app.models.content import OrganizationDocument
 from app.models.users import Role, User, UserRoleAssignment
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SEED_DIR = REPO_ROOT / "docs" / "seed"
-
-# Три файла из docs/seed (название для UI + порядок сортировки)
+# Три файла (название для UI + порядок сортировки)
 ORG_DOCUMENTS: list[dict[str, str | int]] = [
     {"file": "Отказ от услуги.rtf", "title": "Отказ от услуги", "sort_order": 0},
     {
@@ -46,6 +45,19 @@ ORG_DOCUMENTS: list[dict[str, str | int]] = [
     },
     {"file": "Условия возврата товара.rtf", "title": "Условия возврата товара", "sort_order": 2},
 ]
+
+
+def _resolve_seed_dir() -> Path:
+    """В контейнере /app только backend — RTF лежат в scripts/data/org_docs."""
+    here = Path(__file__).resolve().parent
+    probe = ORG_DOCUMENTS[0]["file"]
+    embedded = here / "data" / "org_docs"
+    if embedded.is_dir() and (embedded / probe).is_file():
+        return embedded
+    repo_docs = here.parents[2] / "docs" / "seed"
+    if repo_docs.is_dir() and (repo_docs / probe).is_file():
+        return repo_docs
+    return embedded if embedded.is_dir() else repo_docs
 
 
 def _read_rtf_text(path: Path) -> str:
@@ -77,9 +89,10 @@ async def seed(*, dry_run: bool) -> None:
     engine = create_async_engine(str(settings.DATABASE_URL), pool_pre_ping=True)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+    seed_dir = _resolve_seed_dir()
     missing: list[str] = []
     for item in ORG_DOCUMENTS:
-        p = SEED_DIR / str(item["file"])
+        p = seed_dir / str(item["file"])
         if not p.is_file():
             missing.append(str(p))
     if missing:
@@ -88,7 +101,7 @@ async def seed(*, dry_run: bool) -> None:
     async with factory() as session:
         admin_id = await _first_admin_id(session)
         for item in ORG_DOCUMENTS:
-            path = SEED_DIR / str(item["file"])
+            path = seed_dir / str(item["file"])
             title = str(item["title"])
             sort_order = int(item["sort_order"])
             slug = slugify(title)
