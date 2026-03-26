@@ -1,6 +1,7 @@
 """Admin notifications router — send notification + list log."""
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -11,10 +12,12 @@ from app.core.exceptions import AppValidationError
 from app.core.openapi import error_responses
 from app.core.pagination import PaginatedResponse, PaginationParams
 from app.core.security import require_role
-from app.models.users import Notification
+from app.models.profiles import DoctorProfile
+from app.models.users import Notification, User
 from app.schemas.notifications import (
     NotificationListItem,
     NotificationResponse,
+    NotificationUserNested,
     SendNotificationRequest,
 )
 from app.services.notification_service import NotificationService
@@ -80,8 +83,9 @@ async def list_notifications(
     count_q = select(func.count(Notification.id))
 
     if user_id:
-        q = q.where(Notification.user_id == user_id)
-        count_q = count_q.where(Notification.user_id == user_id)
+        uid = UUID(user_id)
+        q = q.where(Notification.user_id == uid)
+        count_q = count_q.where(Notification.user_id == uid)
     if status:
         q = q.where(Notification.status == status)
         count_q = count_q.where(Notification.status == status)
@@ -95,10 +99,37 @@ async def list_notifications(
     )
     notifs = result.scalars().all()
 
+    uid_list = list({n.user_id for n in notifs})
+    email_map: dict[UUID, str] = {}
+    name_map: dict[UUID, str] = {}
+    if uid_list:
+        u_rows = (
+            await db.execute(select(User.id, User.email).where(User.id.in_(uid_list)))
+        ).all()
+        for uid, email in u_rows:
+            email_map[uid] = email
+        dp_rows = (
+            await db.execute(
+                select(
+                    DoctorProfile.user_id,
+                    DoctorProfile.first_name,
+                    DoctorProfile.last_name,
+                ).where(DoctorProfile.user_id.in_(uid_list))
+            )
+        ).all()
+        for uid, fn, ln in dp_rows:
+            full = f"{ln or ''} {fn or ''}".strip()
+            name_map[uid] = full or None
+
     data = [
         NotificationListItem(
             id=n.id,
             user_id=n.user_id,
+            user=NotificationUserNested(
+                id=n.user_id,
+                email=email_map.get(n.user_id, ""),
+                full_name=name_map.get(n.user_id),
+            ),
             template_code=n.template_code,
             channel=n.channel,
             title=n.title,

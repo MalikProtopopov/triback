@@ -20,9 +20,16 @@ class NotificationResponse(BaseModel):
     status: str
 
 
+class NotificationUserNested(BaseModel):
+    id: UUID
+    email: str
+    full_name: str | None = None
+
+
 class NotificationListItem(BaseModel):
     id: UUID
     user_id: UUID
+    user: NotificationUserNested
     template_code: str
     channel: str
     title: str
