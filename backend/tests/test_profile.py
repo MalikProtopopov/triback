@@ -469,6 +469,37 @@ async def test_get_public_no_draft_after_approved(
     assert data["pending_draft"]["reviewed_at"] is not None
 
 
+async def test_list_my_notifications(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    from app.core.enums import NotificationStatus
+    from app.models.users import Notification
+
+    db_session.add(
+        Notification(
+            user_id=doctor_user.id,
+            template_code="reminder_7d",
+            channel="email",
+            title="Напоминание",
+            body="Текст",
+            status=NotificationStatus.SENT,
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/v1/profile/notifications",
+        headers=auth_headers_doctor,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 1
+    assert any(item["template_code"] == "reminder_7d" for item in data["data"])
+
+
 async def test_profile_unauthenticated(client: AsyncClient):
     resp = await client.get(PERSONAL_URL)
     assert resp.status_code == 401

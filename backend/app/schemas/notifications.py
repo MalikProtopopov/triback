@@ -1,7 +1,7 @@
 """Pydantic schemas for admin notification endpoints."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -24,6 +24,8 @@ class NotificationUserNested(BaseModel):
     id: UUID
     email: str
     full_name: str | None = None
+    phone: str | None = None
+    telegram_username: str | None = None
 
 
 class NotificationListItem(BaseModel):
@@ -36,3 +38,17 @@ class NotificationListItem(BaseModel):
     status: str
     sent_at: datetime | None = None
     created_at: datetime
+
+
+class ProfileNotificationItem(BaseModel):
+    """In-app notification row for the current user (journal subset)."""
+
+    id: UUID
+    template_code: str
+    channel: str
+    title: str
+    body: str
+    status: str
+    sent_at: datetime | None = None
+    created_at: datetime
+    payload: dict[str, Any] | None = None

@@ -219,7 +219,10 @@ class PaymentWebhookService:
             from app.tasks.telegram_tasks import notify_admin_payment_received
 
             await notify_admin_payment_received.kiq(
-                email, float(payment.amount), payment.product_type
+                str(payment.user_id),
+                email,
+                float(payment.amount),
+                str(payment.product_type),
             )
             if send_user_telegram and payment.product_type != ProductType.MEMBERSHIP_ARREARS:
                 from app.tasks.telegram_tasks import notify_user_payment_succeeded

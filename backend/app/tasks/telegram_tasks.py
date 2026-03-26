@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import structlog
+from uuid import UUID
+
 from sqlalchemy import select
 
 from app.core.logging_privacy import mask_email_for_log
+from app.services.notification_user_context import build_user_contact_context
+from app.services.telegram_message_format import (
+    contact_lines_for_admin,
+    format_admin_alert,
+    format_user_notice,
+    product_type_ru,
+    tg_escape,
+)
 from app.services.telegram_service import TelegramService
 from app.tasks import broker
 
@@ -21,6 +31,13 @@ async def _get_svc_async() -> TelegramService:
         if config:
             return TelegramService(bot_token=config[0], owner_chat_id=config[1])
         return TelegramService()
+
+
+async def _load_contact_context(user_id: str):
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        return await build_user_contact_context(db, UUID(user_id))
 
 
 async def _send_to_user(user_id: str, text: str) -> bool:
@@ -55,7 +72,9 @@ async def notify_admin_new_registration(user_id: str) -> None:
         logger.warning("telegram_not_configured")
         return
 
-    text = f"Новая регистрация врача.\nUser ID: {user_id}"
+    ctx = await _load_contact_context(user_id)
+    text = format_admin_alert("Новая регистрация врача", contact_lines_for_admin(ctx))
+
     try:
         await svc.send_message(int(svc._owner_chat_id), text)
     except Exception:
@@ -87,10 +106,16 @@ async def notify_user_moderation_result(
     user_id: str, status: str, comment: str | None = None
 ) -> None:
     """Notify user via Telegram about their onboarding moderation result."""
-    status_text = "одобрен ✅" if status == "active" else "отклонён ❌"
-    text = f"Ваша анкета была проверена.\nСтатус: {status_text}"
+    if status == "approved":
+        status_ru = "Одобрено"
+    elif status == "rejected":
+        status_ru = "Отклонено"
+    else:
+        status_ru = status
+    lines: list[tuple[str, str]] = [("Статус", status_ru)]
     if comment:
-        text += f"\nКомментарий: {comment}"
+        lines.append(("Комментарий", comment))
+    text = format_user_notice("Результат проверки анкеты", lines)
     await _send_to_user(user_id, text)
 
 
@@ -99,12 +124,15 @@ async def notify_user_draft_result(
     user_id: str, status: str, rejection_reason: str | None = None
 ) -> None:
     """Notify user via Telegram about their public profile draft moderation result."""
-    if status == "approved":
-        text = "Ваш публичный профиль одобрен и опубликован ✅"
+    if status == "approve":
+        title = "Публичный профиль"
+        lines = [("Статус", "Одобрен и опубликован")]
     else:
-        text = "Ваш публичный профиль требует правок ❌"
+        title = "Публичный профиль"
+        lines = [("Статус", "Требуются правки")]
         if rejection_reason:
-            text += f"\nПричина: {rejection_reason}"
+            lines.append(("Причина", rejection_reason))
+    text = format_user_notice(title, lines)
     await _send_to_user(user_id, text)
 
 
@@ -113,18 +141,26 @@ async def notify_user_payment_succeeded(
     user_id: str, amount: float, product_type: str
 ) -> None:
     """Notify user via Telegram about successful payment."""
-    text = (
-        f"Оплата прошла успешно ✅\n"
-        f"Сумма: {amount:.2f} ₽\n"
-        f"Тип: {product_type}"
-    )
+    lines = [
+        ("Сумма", f"{amount:.2f} ₽"),
+        ("Тип", product_type_ru(product_type)),
+    ]
+    text = format_user_notice("Оплата прошла успешно", lines)
     await _send_to_user(user_id, text)
 
 
 @broker.task
 async def notify_user_payment_failed(user_id: str) -> None:
     """Notify user via Telegram about failed payment."""
-    text = "Платёж не удался ❌\nПожалуйста, попробуйте снова или свяжитесь с поддержкой."
+    text = format_user_notice(
+        "Платёж не выполнен",
+        [
+            (
+                "Действие",
+                "Попробуйте снова или свяжитесь с поддержкой.",
+            ),
+        ],
+    )
     await _send_to_user(user_id, text)
 
 
@@ -133,36 +169,47 @@ async def notify_user_event_ticket(
     user_id: str, event_title: str, event_date: str, amount: float
 ) -> None:
     """Notify user via Telegram about purchased event ticket."""
-    text = (
-        f"Билет на мероприятие оформлен ✅\n"
-        f"Мероприятие: {event_title}\n"
-        f"Дата: {event_date}\n"
-        f"Сумма: {amount:.2f} ₽"
-    )
+    lines = [
+        ("Мероприятие", event_title),
+        ("Дата", event_date),
+        ("Сумма", f"{amount:.2f} ₽"),
+    ]
+    text = format_user_notice("Билет на мероприятие оформлен", lines)
     await _send_to_user(user_id, text)
 
 
 @broker.task
 async def notify_user_receipt_available(user_id: str, amount: float) -> None:
     """Notify user via Telegram that their receipt is ready."""
-    text = f"Ваш чек готов 🧾\nСумма: {amount:.2f} ₽\nЧек доступен в личном кабинете."
+    lines = [
+        ("Сумма", f"{amount:.2f} ₽"),
+        ("Где смотреть", "Личный кабинет"),
+    ]
+    text = format_user_notice("Чек сформирован", lines)
     await _send_to_user(user_id, text)
 
 
 @broker.task
 async def notify_user_manual_reminder(user_id: str, message: str | None = None) -> bool:
     """Send manual reminder from admin to user's Telegram. Returns True if sent."""
-    text = message if message else "Ваша подписка скоро истекает. Не забудьте продлить членство."
-    return await _send_to_user(user_id, text)
+    if message:
+        body = f"<b>Напоминание</b>\n{tg_escape(message)}"
+    else:
+        body = format_user_notice(
+            "Напоминание",
+            [("Текст", "Подписка скоро истекает — продлите членство в личном кабинете.")],
+        )
+    return await _send_to_user(user_id, body)
 
 
 @broker.task
 async def notify_user_subscription_expiring(user_id: str, days_left: int) -> None:
     """Notify user via Telegram that their subscription is expiring soon."""
-    text = (
-        f"Ваша подписка истекает через {days_left} дн. ⏰\n"
-        f"Не забудьте продлить её в личном кабинете."
-    )
+    lines = [
+        ("Осталось дней", str(days_left)),
+        ("Действие", "Продлите подписку в личном кабинете."),
+    ]
+    text = format_user_notice("Подписка скоро истекает", lines)
     await _send_to_user(user_id, text)
 
 
@@ -173,11 +220,15 @@ async def notify_admin_new_draft(user_id: str, full_name: str) -> None:
     if not svc._token or not svc._owner_chat_id:
         logger.warning("telegram_not_configured")
         return
-    text = (
-        f"Новый черновик на модерацию 📝\n"
-        f"Врач: {full_name}\n"
-        f"User ID: {user_id}"
-    )
+
+    ctx = await _load_contact_context(user_id)
+    lines: list[tuple[str, str]] = [("Врач (черновик)", full_name)]
+    if ctx:
+        lines.extend(contact_lines_for_admin(ctx))
+    else:
+        lines.append(("User ID", user_id))
+
+    text = format_admin_alert("Новый черновик на модерацию", lines)
     try:
         await svc.send_message(int(svc._owner_chat_id), text)
     except Exception:
@@ -186,7 +237,10 @@ async def notify_admin_new_draft(user_id: str, full_name: str) -> None:
 
 @broker.task
 async def notify_admin_payment_received(
-    user_email: str, amount: float, product_type: str
+    user_id: str,
+    user_email: str,
+    amount: float,
+    product_type: str,
 ) -> None:
     """Notify admin chat about a successful payment."""
     svc = await _get_svc_async()
@@ -194,12 +248,18 @@ async def notify_admin_payment_received(
         logger.warning("telegram_not_configured")
         return
 
-    text = (
-        f"Оплата получена\n"
-        f"Email: {user_email}\n"
-        f"Сумма: {amount:.2f} ₽\n"
-        f"Тип: {product_type}"
-    )
+    ctx = await _load_contact_context(user_id)
+    lines: list[tuple[str, str]] = [
+        ("Сумма", f"{amount:.2f} ₽"),
+        ("Тип оплаты", product_type_ru(str(product_type))),
+        ("Email (платёж)", user_email),
+    ]
+    if ctx:
+        lines.extend(contact_lines_for_admin(ctx))
+    else:
+        lines.append(("User ID", user_id))
+
+    text = format_admin_alert("Оплата получена", lines)
     try:
         await svc.send_message(int(svc._owner_chat_id), text)
     except Exception:

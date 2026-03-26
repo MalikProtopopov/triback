@@ -13,7 +13,7 @@ from app.core.openapi import error_responses
 from app.core.pagination import PaginatedResponse, PaginationParams
 from app.core.security import require_role
 from app.models.profiles import DoctorProfile
-from app.models.users import Notification, User
+from app.models.users import Notification, TelegramBinding, User
 from app.schemas.notifications import (
     NotificationListItem,
     NotificationResponse,
@@ -100,7 +100,9 @@ async def list_notifications(
 
     uid_list = list({n.user_id for n in notifs})
     email_map: dict[UUID, str] = {}
-    name_map: dict[UUID, str] = {}
+    name_map: dict[UUID, str | None] = {}
+    phone_map: dict[UUID, str | None] = {}
+    tg_map: dict[UUID, str | None] = {}
     if uid_list:
         u_rows = (
             await db.execute(select(User.id, User.email).where(User.id.in_(uid_list)))
@@ -113,12 +115,25 @@ async def list_notifications(
                     DoctorProfile.user_id,
                     DoctorProfile.first_name,
                     DoctorProfile.last_name,
+                    DoctorProfile.phone,
                 ).where(DoctorProfile.user_id.in_(uid_list))
             )
         ).all()
-        for uid, fn, ln in dp_rows:
+        for uid, fn, ln, phone in dp_rows:
             full = f"{ln or ''} {fn or ''}".strip()
             name_map[uid] = full or None
+            phone_map[uid] = phone or None
+
+        tg_rows = (
+            await db.execute(
+                select(TelegramBinding.user_id, TelegramBinding.tg_username).where(
+                    TelegramBinding.user_id.in_(uid_list)
+                )
+            )
+        ).all()
+        for uid, tg_username in tg_rows:
+            raw = (tg_username or "").strip().lstrip("@")
+            tg_map[uid] = raw or None
 
     data = [
         NotificationListItem(
@@ -128,6 +143,8 @@ async def list_notifications(
                 id=n.user_id,
                 email=email_map.get(n.user_id, ""),
                 full_name=name_map.get(n.user_id),
+                phone=phone_map.get(n.user_id),
+                telegram_username=tg_map.get(n.user_id),
             ),
             template_code=n.template_code,
             channel=n.channel,

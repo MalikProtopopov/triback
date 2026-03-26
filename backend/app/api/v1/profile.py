@@ -4,17 +4,21 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import get_current_user_id
 from app.core.openapi import error_responses
+from app.core.pagination import PaginatedResponse, PaginationParams
 from app.schemas.auth import MessageResponse
 from app.schemas.event_registration import (
     MyEventListItem,
     MyEventsPaginatedResponse,
     UserEventRegistrationsPaginatedResponse,
 )
+from app.models.users import Notification
+from app.schemas.notifications import ProfileNotificationItem
 from app.schemas.profile import (
     DiplomaPhotoResponse,
     DocumentNested,
@@ -79,6 +83,52 @@ async def get_personal(
         diploma_photo_url=file_service.build_media_url(profile.diploma_photo_url),
         colleague_contacts=profile.colleague_contacts,
         documents=documents,
+    )
+
+
+@router.get(
+    "/notifications",
+    response_model=PaginatedResponse[ProfileNotificationItem],
+    summary="Мои уведомления (журнал из БД)",
+    responses=error_responses(401),
+)
+async def list_my_notifications(
+    user_id: UUID = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db_session),
+    pagination: PaginationParams = Depends(),
+) -> PaginatedResponse[ProfileNotificationItem]:
+    """Список записей из таблицы ``notifications`` для текущего пользователя.
+
+    Сообщения, отправленные только в Telegram без записи в БД, здесь не отображаются.
+    """
+    count_q = select(func.count(Notification.id)).where(Notification.user_id == user_id)
+    total = (await db.execute(count_q)).scalar() or 0
+
+    q = (
+        select(Notification)
+        .where(Notification.user_id == user_id)
+        .order_by(Notification.created_at.desc())
+        .limit(pagination.limit)
+        .offset(pagination.offset)
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    data = [
+        ProfileNotificationItem(
+            id=n.id,
+            template_code=n.template_code,
+            channel=n.channel,
+            title=n.title,
+            body=n.body,
+            status=n.status,
+            sent_at=n.sent_at,
+            created_at=n.created_at,
+            payload=n.payload,
+        )
+        for n in rows
+    ]
+    return PaginatedResponse(
+        data=data, total=total, limit=pagination.limit, offset=pagination.offset
     )
 
 
@@ -294,8 +344,6 @@ async def list_my_events(
 
     - **401** — не авторизован
     """
-    from sqlalchemy import func, select
-
     from app.models.events import Event, EventRegistration, EventTariff
 
     base = (

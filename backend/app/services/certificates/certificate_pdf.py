@@ -10,6 +10,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+# Space (pt) between logo bottom and «СЕРТИФИКАТ» baseline (was 25 — too tight).
+_LOGO_TO_HEADING_GAP_PT = 52
+
 
 def _register_cyrillic_fonts() -> tuple[str, str, str] | None:
     """Try to register DejaVu fonts and return (regular, bold, italic) names."""
@@ -177,7 +180,7 @@ def _generate_member_pdf(
             mask="auto",
             preserveAspectRatio=True,
         )
-        y_cursor -= logo_h + 25
+        y_cursor -= logo_h + _LOGO_TO_HEADING_GAP_PT
     else:
         y_cursor -= 20
 

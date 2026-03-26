@@ -204,7 +204,7 @@ class TelegramService:
             binding.is_in_channel = True
 
         await db.commit()
-        await self.send_message(tg_chat_id, "Telegram успешно привязан! ✅")
+        await self.send_message(tg_chat_id, "Telegram успешно привязан.")
 
     # ── Binding status ────────────────────────────────────────────
 
