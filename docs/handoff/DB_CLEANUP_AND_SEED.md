@@ -18,7 +18,10 @@ poetry run python scripts/seed_staff_users.py --execute
 # при необходимости: seed_organization_documents.py, seed_merge_cities.py
 ```
 
-Пароли и логины смотрите в **`seed_staff_users.py`** (константа `STAFF_ACCOUNTS`) — на проде смените после первого входа.
+Пароли и логины смотрите в **`seed_staff_users.py`** (константа `STAFF_ACCOUNTS`).  
+Адреса должны быть валидны для **EmailStr** (нельзя `*.local`). Старые `*@triho-staff.local` можно исправить:  
+`poetry run python scripts/seed_staff_users.py --execute --migrate-legacy-emails`  
+На проде смените пароли и замените `example.com` на свой домен в скрипте при необходимости.
 
 ---
 

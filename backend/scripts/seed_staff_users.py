@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Создание трёх учёток staff: admin, manager, accountant — по одной роли на пользователя.
 
+Email должны проходить валидацию API (Pydantic EmailStr): домены вроде .local / .localhost
+нельзя — используйте обычный домен (ниже — example.com для примера).
+
 Запускайте после миграций и (при необходимости) после db_full_reset.py.
-Пароли и email заданы ниже — смените их на продакшене после первого входа.
+
+Если учётки уже созданы со старыми адресами (*@triho-staff.local), выполните один раз:
+  poetry run python scripts/seed_staff_users.py --execute --migrate-legacy-emails
 
 Usage (backend/):
   poetry run python scripts/seed_staff_users.py
@@ -48,23 +53,31 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Учётные данные по умолчанию (только для dev/staging — смените на проде)
 # ---------------------------------------------------------------------------
+# Домен example.com — валиден для EmailStr; на проде замените на свой домен в скрипте.
 STAFF_ACCOUNTS: list[dict[str, str]] = [
     {
-        "email": "admin@triho-staff.local",
+        "email": "triho-admin@example.com",
         "password": "Triho_Admin_2026!Staff",
         "role": "admin",
     },
     {
-        "email": "manager@triho-staff.local",
+        "email": "triho-manager@example.com",
         "password": "Triho_Manager_2026!Staff",
         "role": "manager",
     },
     {
-        "email": "accountant@triho-staff.local",
+        "email": "triho-accountant@example.com",
         "password": "Triho_Accountant_2026!Staff",
         "role": "accountant",
     },
 ]
+
+# Старые адреса из первого сида (невалидны для логина) → новые
+LEGACY_EMAIL_MAP: dict[str, str] = {
+    "admin@triho-staff.local": "triho-admin@example.com",
+    "manager@triho-staff.local": "triho-manager@example.com",
+    "accountant@triho-staff.local": "triho-accountant@example.com",
+}
 
 ROLES_SEED = [
     ("admin", "Администратор"),
@@ -73,6 +86,33 @@ ROLES_SEED = [
     ("doctor", "Врач"),
     ("user", "Пользователь"),
 ]
+
+
+async def migrate_legacy_emails(session: AsyncSession, dry_run: bool) -> int:
+    """Переименовать *@triho-staff.local → адреса из STAFF_ACCOUNTS (валидны для EmailStr)."""
+    changed = 0
+    for old_email, new_email in LEGACY_EMAIL_MAP.items():
+        user = (await session.execute(select(User).where(User.email == old_email))).scalar_one_or_none()
+        if not user:
+            continue
+        other = (
+            await session.execute(
+                select(User.id).where(User.email == new_email, User.id != user.id)
+            )
+        ).scalar_one_or_none()
+        if other:
+            print(
+                f"Пропуск: {new_email!r} уже занят другим пользователем, "
+                f"не трогаем {old_email!r}"
+            )
+            continue
+        if dry_run:
+            print(f"[dry-run] UPDATE users SET email={new_email!r} WHERE email={old_email!r}")
+        else:
+            user.email = new_email
+            print(f"Email обновлён: {old_email!r} → {new_email!r}")
+        changed += 1
+    return changed
 
 
 async def ensure_roles(session: AsyncSession) -> dict[str, Role]:
@@ -87,9 +127,19 @@ async def ensure_roles(session: AsyncSession) -> dict[str, Role]:
     return out
 
 
-async def seed(*, dry_run: bool) -> None:
+async def seed(*, dry_run: bool, migrate_legacy: bool) -> None:
     engine = create_async_engine(str(settings.DATABASE_URL), pool_pre_ping=True)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    if migrate_legacy:
+        print("=== Миграция старых email (.local → валидные) ===\n")
+        async with factory() as session:
+            await migrate_legacy_emails(session, dry_run)
+            if dry_run:
+                await session.rollback()
+            else:
+                await session.commit()
+        print()
 
     print("Планируемые учётки:")
     for a in STAFF_ACCOUNTS:
@@ -154,8 +204,18 @@ def main() -> None:
         action="store_true",
         help="Записать в БД (без флага — dry-run).",
     )
+    p.add_argument(
+        "--migrate-legacy-emails",
+        action="store_true",
+        help="Обновить в БД старые адреса *@triho-staff.local на новые (example.com).",
+    )
     args = p.parse_args()
-    asyncio.run(seed(dry_run=not args.execute))
+    asyncio.run(
+        seed(
+            dry_run=not args.execute,
+            migrate_legacy=args.migrate_legacy_emails,
+        )
+    )
 
 
 if __name__ == "__main__":
