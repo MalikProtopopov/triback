@@ -22,6 +22,7 @@ from app.models.events import (  # noqa: F401
 )
 from app.models.payment_webhook_inbox import PaymentWebhookInbox  # noqa: F401
 from app.models.arrears import MembershipArrear  # noqa: F401
+from app.models.protocol_history import ProtocolHistoryEntry  # noqa: F401
 from app.models.profiles import (  # noqa: F401
     AuditLog,
     DoctorDocument,

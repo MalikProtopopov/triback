@@ -5,9 +5,11 @@ _ADMIN_SIDEBAR = {
     "admin": [
         "dashboard",
         "doctors",
+        "protocol_history",
         "doctors_import",
         "events",
         "payments",
+        "arrears",
         "content",
         "content_articles",
         "content_themes",
@@ -25,6 +27,7 @@ _ADMIN_SIDEBAR = {
     "manager": [
         "dashboard",
         "doctors",
+        "protocol_history",
         "events",
         "payments",
         "content",
@@ -38,6 +41,7 @@ _ADMIN_SIDEBAR = {
     ],
     "accountant": [
         "payments",
+        "arrears",
     ],
 }
 

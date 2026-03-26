@@ -246,6 +246,13 @@ async def accountant_user(db_session: AsyncSession) -> User:
 
 
 @pytest.fixture
+async def manager_user(db_session: AsyncSession) -> User:
+    return await _create_user_with_role(
+        db_session, f"mgr_{uuid4().hex[:8]}@test.com", "manager"
+    )
+
+
+@pytest.fixture
 def auth_headers_doctor(doctor_user: User) -> dict[str, str]:
     return _make_auth_headers(doctor_user.id, "doctor")
 
@@ -258,6 +265,11 @@ def auth_headers_admin(admin_user: User) -> dict[str, str]:
 @pytest.fixture
 def auth_headers_accountant(accountant_user: User) -> dict[str, str]:
     return _make_auth_headers(accountant_user.id, "accountant")
+
+
+@pytest.fixture
+def auth_headers_manager(manager_user: User) -> dict[str, str]:
+    return _make_auth_headers(manager_user.id, "manager")
 
 
 @pytest.fixture

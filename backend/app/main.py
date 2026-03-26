@@ -196,6 +196,8 @@ _OPENAPI_TAGS = [
     {"name": "Admin - Settings", "description": "Общие настройки сайта, города, тарифные планы подписки"},
     {"name": "Admin - Doctors", "description": "Управление врачами: список, модерация, импорт Excel, пользователи портала"},
     {"name": "Admin - Payments", "description": "Список всех платежей, ручное создание платежей"},
+    {"name": "Admin - Arrears", "description": "Задолженности по членским взносам: список, сводка, ручные операции"},
+    {"name": "Admin - Protocol History", "description": "История протокола: приём в ассоциацию и исключение врачей"},
     {"name": "Admin - Dashboard", "description": "Сводная статистика: пользователи, подписки, платежи, мероприятия"},
     {"name": "Admin - Notifications", "description": "Отправка уведомлений пользователям, журнал уведомлений"},
     {"name": "Admin - SEO", "description": "Управление SEO-метаданными страниц"},
