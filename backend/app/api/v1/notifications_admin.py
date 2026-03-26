@@ -69,7 +69,7 @@ async def send_notification(
 )
 async def list_notifications(
     pagination: PaginationParams = Depends(),
-    user_id: str | None = Query(None, description="Фильтр по UUID пользователя"),
+    user_id: UUID | None = Query(None, description="Фильтр по UUID пользователя"),
     status: str | None = Query(None, description="sent | failed | pending"),
     payload: dict[str, Any] = require_role("admin", "manager"),
     db: AsyncSession = Depends(get_db_session),
@@ -83,9 +83,8 @@ async def list_notifications(
     count_q = select(func.count(Notification.id))
 
     if user_id:
-        uid = UUID(user_id)
-        q = q.where(Notification.user_id == uid)
-        count_q = count_q.where(Notification.user_id == uid)
+        q = q.where(Notification.user_id == user_id)
+        count_q = count_q.where(Notification.user_id == user_id)
     if status:
         q = q.where(Notification.status == status)
         count_q = count_q.where(Notification.status == status)
