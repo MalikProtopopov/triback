@@ -13,6 +13,7 @@ from app.core.pagination import PaginatedResponse
 from app.core.redis import get_redis
 from app.core.security import require_role
 from app.schemas.auth import MessageResponse
+from app.schemas.event_registration import UserEventRegistrationsPaginatedResponse
 from app.schemas.doctor_admin import (
     AdminCreateDoctorRequest,
     AdminCreateDoctorResponse,
@@ -337,6 +338,47 @@ async def get_portal_user(
     """
     svc = DoctorAdminService(db)
     return await svc.get_portal_user(user_id)
+
+
+@router.get(
+    "/portal-users/{user_id}/event-registrations",
+    response_model=UserEventRegistrationsPaginatedResponse,
+    summary="Регистрации пользователя на мероприятия (с платежом и тарифом)",
+    responses=error_responses(401, 403, 404),
+)
+async def list_portal_user_event_registrations(
+    user_id: UUID,
+    payload: dict[str, Any] = ADMIN_MANAGER,
+    db: AsyncSession = Depends(get_db_session),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(
+        None, description="pending | confirmed | cancelled",
+    ),
+    event_id: UUID | None = Query(None, description="Фильтр по мероприятию"),
+) -> dict[str, Any]:
+    """Список регистраций выбранного пользователя портала — для вкладки «Мероприятия» у врача.
+
+    Тело ответа совпадает с ``GET /api/v1/profile/event-registrations``.
+
+    - **401** — не авторизован
+    - **403** — роль не admin/manager
+    """
+    from app.services.event_registration.user_registrations_list import (
+        list_registrations_for_user,
+    )
+
+    svc = DoctorAdminService(db)
+    await svc.get_portal_user(user_id)
+
+    return await list_registrations_for_user(
+        db,
+        user_id,
+        limit=limit,
+        offset=offset,
+        status=status,
+        event_id=event_id,
+    )
 
 
 @router.get(

@@ -9,7 +9,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ProductType, SubscriptionStatus
@@ -384,3 +384,34 @@ async def test_list_arrears_include_inactive_false_only_open(
     assert row0.user.email
     assert row0.user.full_name == "Doctor Test"
     assert row0.user.phone == "+79001234567"
+
+
+@pytest.mark.anyio
+async def test_arrears_auto_accrual_job_stub_does_not_create_rows(
+    db_session: AsyncSession,
+):
+    """With ``arrears_auto_accrual_enabled`` on, the daily job is still a no-op (no new rows).
+
+    When real automatic accrual is implemented in ``arrears_auto_accrual_job``, add tests for
+    ``MembershipArrear`` rows with ``source='automatic'`` and correct amounts/years.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from app.tasks.scheduler import arrears_auto_accrual_job
+
+    before = (
+        await db_session.execute(select(func.count(MembershipArrear.id)))
+    ).scalar_one()
+
+    with patch(
+        "app.services.membership_arrears_service.load_site_settings_dict",
+        new_callable=AsyncMock,
+        return_value={"arrears_auto_accrual_enabled": True},
+    ):
+        out = await arrears_auto_accrual_job()
+
+    assert out == 0
+    after = (
+        await db_session.execute(select(func.count(MembershipArrear.id)))
+    ).scalar_one()
+    assert after == before

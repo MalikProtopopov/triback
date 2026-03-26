@@ -112,3 +112,67 @@ class MyEventsPaginatedResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ── User event registrations list (LK + admin) ────────────────────
+
+
+class UserEventRegistrationNested(BaseModel):
+    """Регистрация на мероприятие."""
+
+    id: UUID
+    status: str
+    created_at: datetime
+    guest_full_name: str | None = None
+    guest_email: str | None = None
+    guest_workplace: str | None = None
+    guest_specialization: str | None = None
+    fiscal_email: str | None = None
+
+
+class UserEventNested(BaseModel):
+    id: UUID
+    slug: str
+    title: str
+    event_date: datetime
+    event_end_date: datetime | None = None
+    location: str | None = None
+    status: str
+    cover_image_url: str | None = None
+
+
+class UserEventTariffNested(BaseModel):
+    id: UUID
+    name: str
+    price: float
+    member_price: float
+    applied_price: float
+    is_member_price: bool
+
+
+class UserEventRegistrationPaymentNested(BaseModel):
+    id: UUID
+    amount: float
+    product_type: str
+    status: str
+    status_label: str = ""
+    description: str | None = None
+    payment_url: str | None = None
+    paid_at: datetime | None = None
+    expires_at: datetime | None = None
+    created_at: datetime
+    external_payment_id: str | None = None
+
+
+class UserEventRegistrationListItem(BaseModel):
+    registration: UserEventRegistrationNested
+    event: UserEventNested
+    tariff: UserEventTariffNested
+    payment: UserEventRegistrationPaymentNested | None = None
+
+
+class UserEventRegistrationsPaginatedResponse(BaseModel):
+    data: list[UserEventRegistrationListItem]
+    total: int
+    limit: int
+    offset: int

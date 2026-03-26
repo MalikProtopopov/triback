@@ -10,7 +10,11 @@ from app.core.database import get_db_session
 from app.core.dependencies import get_current_user_id
 from app.core.openapi import error_responses
 from app.schemas.auth import MessageResponse
-from app.schemas.event_registration import MyEventListItem, MyEventsPaginatedResponse
+from app.schemas.event_registration import (
+    MyEventListItem,
+    MyEventsPaginatedResponse,
+    UserEventRegistrationsPaginatedResponse,
+)
 from app.schemas.profile import (
     DiplomaPhotoResponse,
     DocumentNested,
@@ -235,6 +239,44 @@ async def upload_photo(
 
 
 # ── D17: My events ──────────────────────────────────────────────
+
+
+@router.get(
+    "/event-registrations",
+    response_model=UserEventRegistrationsPaginatedResponse,
+    summary="Мои регистрации на мероприятия (с платежом и тарифом)",
+    responses=error_responses(401),
+)
+async def list_my_event_registrations(
+    user_id: UUID = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db_session),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(
+        None, description="pending | confirmed | cancelled",
+    ),
+    event_id: UUID | None = Query(None, description="Фильтр по мероприятию"),
+) -> dict[str, Any]:
+    """Полный список регистраций текущего пользователя с мероприятием, тарифом и платежом.
+
+    Отличается от ``GET /profile/events``: здесь все статусы регистрации и вложенный ``payment``
+    (может быть ``null`` до оплаты). Старый эндпоинт по-прежнему только подтверждённые без платежа.
+
+    - **401** — не авторизован
+    """
+    from app.services.event_registration.user_registrations_list import (
+        list_registrations_for_user,
+    )
+
+    return await list_registrations_for_user(
+        db,
+        user_id,
+        limit=limit,
+        offset=offset,
+        status=status,
+        event_id=event_id,
+    )
+
 
 @router.get(
     "/events",

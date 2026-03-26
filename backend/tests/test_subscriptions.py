@@ -1,12 +1,16 @@
 """Subscription status and product type determination tests."""
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.arrears import MembershipArrear
+from app.models.site import SiteSetting
 from app.models.users import User
 from app.services.payment_providers.base import CreatePaymentResult
 
@@ -181,3 +185,77 @@ async def test_pay_entry_fee_over_90_days(
         )
 
     assert resp.status_code == 201
+
+
+async def test_subscription_status_open_arrears_totals_and_block(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    """Doctor with two open arrears and block setting: list, sum, arrears_block_active."""
+    from tests.factories import create_doctor_profile, create_plan, create_subscription
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    plan = await create_plan(db_session)
+    await create_subscription(db_session, user=doctor_user, plan=plan, status="active")
+    db_session.add_all(
+        [
+            MembershipArrear(
+                user_id=doctor_user.id,
+                year=2024,
+                amount=Decimal("50.00"),
+                description="arrear A",
+                status="open",
+                source="manual",
+            ),
+            MembershipArrear(
+                user_id=doctor_user.id,
+                year=2023,
+                amount=Decimal("75.50"),
+                description="arrear B",
+                status="open",
+                source="manual",
+            ),
+            SiteSetting(
+                key="arrears_block_membership_features",
+                value={"enabled": True},
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(STATUS_URL, headers=auth_headers_doctor)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["open_arrears"]) == 2
+    assert data["arrears_total"] == pytest.approx(125.5)
+    assert data["arrears_block_active"] is True
+
+
+async def test_subscription_status_no_open_arrears_empty_totals(
+    client: AsyncClient,
+    auth_headers_doctor: dict[str, str],
+    doctor_user: User,
+    db_session: AsyncSession,
+):
+    """No open debts: empty list, zero total; block flag off when nothing to block."""
+    from tests.factories import create_doctor_profile, create_plan, create_subscription
+
+    await create_doctor_profile(db_session, user=doctor_user, status="active")
+    plan = await create_plan(db_session)
+    await create_subscription(db_session, user=doctor_user, plan=plan, status="active")
+    db_session.add(
+        SiteSetting(
+            key="arrears_block_membership_features",
+            value={"enabled": True},
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(STATUS_URL, headers=auth_headers_doctor)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["open_arrears"] == []
+    assert data["arrears_total"] == 0.0
+    assert data["arrears_block_active"] is False
