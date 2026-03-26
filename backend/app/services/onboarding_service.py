@@ -295,7 +295,9 @@ class OnboardingService:
             self.db.add(
                 UserRoleAssignment(user_id=user_id, role_id=doctor_role_obj.id)
             )
-            slug = await generate_unique_slug(self.db, DoctorProfile, "doctor")
+            slug = await generate_unique_slug(
+                self.db, DoctorProfile, f"pending-{user_id}"
+            )
             profile = DoctorProfile(
                 user_id=user_id,
                 first_name="",
@@ -314,9 +316,10 @@ class OnboardingService:
 
         if not has_doctor and not has_user:
             self.db.add(UserRoleAssignment(user_id=user_id, role_id=role_obj.id))
-            profile_id = None
             if role == "doctor":
-                slug = await generate_unique_slug(self.db, DoctorProfile, "doctor")
+                slug = await generate_unique_slug(
+                    self.db, DoctorProfile, f"pending-{user_id}"
+                )
                 profile = DoctorProfile(
                     user_id=user_id,
                     first_name="",
@@ -327,7 +330,6 @@ class OnboardingService:
                 )
                 self.db.add(profile)
                 await self.db.flush()
-                profile_id = profile.id
             await self.db.commit()
             msg = (
                 "Заполните анкету врача для прохождения модерации"

@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ChangeStatus, DoctorStatus, ModerationAction, SubscriptionStatus
 from app.core.exceptions import NotFoundError
-from app.core.utils import generate_unique_slug
+from app.core.utils import generate_doctor_slug
+from app.models.cities import City
 from app.models.profiles import DoctorProfile, DoctorProfileChange, ModerationHistory
 from app.models.subscriptions import Subscription
 from app.models.users import User
@@ -45,10 +46,13 @@ class DoctorModerationService:
         new_status = DoctorStatus.APPROVED if action == ModerationAction.APPROVE else DoctorStatus.REJECTED
         dp.status = new_status
 
-        if action == "approve" and not dp.slug:
-            dp.slug = await generate_unique_slug(
-                self.db, DoctorProfile, f"{dp.last_name} {dp.first_name}"
-            )
+        if action == ModerationAction.APPROVE:
+            city_name: str | None = None
+            if dp.city_id:
+                city = await self.db.get(City, dp.city_id)
+                if city:
+                    city_name = city.name
+            dp.slug = await generate_doctor_slug(self.db, dp, city_name=city_name)
 
         self.db.add(
             ModerationHistory(
@@ -112,10 +116,16 @@ class DoctorModerationService:
 
         now = datetime.now(UTC)
 
-        if action == "approve":
+        if action == ModerationAction.APPROVE:
             for key, value in draft.changes.items():
                 if hasattr(dp, key):
                     setattr(dp, key, value)
+            city_name_draft: str | None = None
+            if dp.city_id:
+                c = await self.db.get(City, dp.city_id)
+                if c:
+                    city_name_draft = c.name
+            dp.slug = await generate_doctor_slug(self.db, dp, city_name=city_name_draft)
             draft.status = ChangeStatus.APPROVED
             draft.reviewed_at = now
             draft.reviewed_by = admin_id

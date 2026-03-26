@@ -123,7 +123,7 @@ async def test_create_doctor_forbidden_for_manager(
     client: AsyncClient,
     db_session: AsyncSession,
 ):
-    from tests.factories import create_role, create_user, assign_role
+    from tests.factories import assign_role, create_role, create_user
 
     user = await create_user(db_session, email="mgr@test.com")
     role = await create_role(db_session, name="manager")
@@ -273,6 +273,78 @@ async def test_moderate_approve(
     assert resp.status_code == 200
     data = resp.json()
     assert data["moderation_status"] == "approved"
+    await db_session.refresh(profile)
+    # ФИО из фабрики: LnameN FnameN → lname{n}-fname{n}
+    assert profile.slug.startswith("lname")
+    assert "fname" in profile.slug
+
+
+async def test_moderate_approve_slug_from_cyrillic_fio(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    from tests.factories import create_doctor_profile
+
+    profile = await create_doctor_profile(
+        db_session,
+        status="pending_review",
+        first_name="Иван",
+        last_name="Иванов",
+        specialization="Трихолог",
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"{ADMIN_DOCTORS_URL}/{profile.id}/moderate",
+        headers=auth_headers_admin,
+        json={"action": "approve"},
+    )
+    assert resp.status_code == 200
+    await db_session.refresh(profile)
+    assert profile.slug == "ivanov-ivan"
+
+
+async def test_moderate_second_same_fio_adds_specialization_to_slug(
+    client: AsyncClient,
+    auth_headers_admin: dict[str, str],
+    db_session: AsyncSession,
+):
+    from tests.factories import create_doctor_profile
+
+    p1 = await create_doctor_profile(
+        db_session,
+        status="pending_review",
+        first_name="Иван",
+        last_name="Иванов",
+        specialization="Трихолог",
+    )
+    p2 = await create_doctor_profile(
+        db_session,
+        status="pending_review",
+        first_name="Иван",
+        last_name="Иванов",
+        specialization="Кардиолог",
+    )
+    await db_session.commit()
+
+    r1 = await client.post(
+        f"{ADMIN_DOCTORS_URL}/{p1.id}/moderate",
+        headers=auth_headers_admin,
+        json={"action": "approve"},
+    )
+    assert r1.status_code == 200
+    r2 = await client.post(
+        f"{ADMIN_DOCTORS_URL}/{p2.id}/moderate",
+        headers=auth_headers_admin,
+        json={"action": "approve"},
+    )
+    assert r2.status_code == 200
+
+    await db_session.refresh(p1)
+    await db_session.refresh(p2)
+    assert p1.slug == "ivanov-ivan"
+    assert p2.slug == "ivanov-ivan-kardiolog"
 
 
 async def test_moderate_reject_no_comment(

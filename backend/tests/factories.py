@@ -87,20 +87,25 @@ async def create_doctor_profile(
     city: City | None = None,
     has_medical_diploma: bool = True,
     specialization: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    middle_name: str | None = None,
+    slug: str | None = None,
 ) -> DoctorProfile:
     if user is None:
         user = await create_user(db)
     n = _next_seq()
     profile = DoctorProfile(
         user_id=user.id,
-        first_name=f"Fname{n}",
-        last_name=f"Lname{n}",
+        first_name=first_name or f"Fname{n}",
+        last_name=last_name or f"Lname{n}",
         phone=f"+7900{n:07d}",
         status=status,
         has_medical_diploma=has_medical_diploma,
         city_id=city.id if city else None,
-        slug=f"doctor-{n}",
+        slug=slug or f"doctor-{n}",
         specialization=specialization,
+        middle_name=middle_name,
     )
     db.add(profile)
     await db.flush()

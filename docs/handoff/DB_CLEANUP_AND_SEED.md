@@ -1,6 +1,28 @@
 # Очистка БД от врачей и что нужно «засеять» после
 
-## Скрипт
+## Полный сброс данных и засев staff (новые скрипты)
+
+| Скрипт | Назначение |
+|--------|------------|
+| `backend/scripts/db_full_reset.py` | **Полный** сброс: `TRUNCATE … CASCADE` по всем таблицам в `public`, кроме **`alembic_version`**. Удаляется **всё**, включая `telegram_integrations`, `certificate_settings`, города, планы, шаблоны. `.env` не трогается. Redis не чистится. |
+| `backend/scripts/seed_staff_users.py` | Создаёт **три** пользователя с фиксированными email/паролями в коде: роли **admin**, **manager**, **accountant** (по одной роли на учётку). Сначала создаёт недостающие строки в **`roles`**. |
+
+Порядок после полного сброса:
+
+```bash
+cd backend
+poetry run alembic upgrade head   # если БД пустая после миграций — как обычно
+poetry run python scripts/db_full_reset.py          # dry-run: список таблиц
+poetry run python scripts/db_full_reset.py --execute
+poetry run python scripts/seed_staff_users.py --execute
+# при необходимости: seed_organization_documents.py, seed_merge_cities.py
+```
+
+Пароли и логины смотрите в **`seed_staff_users.py`** (константа `STAFF_ACCOUNTS`) — на проде смените после первого входа.
+
+---
+
+## Скрипт (частичная очистка врачей)
 
 Файл: `backend/scripts/db_cleanup_doctors.py` (в репозитории)
 
@@ -18,8 +40,11 @@ poetry run python scripts/db_cleanup_doctors.py --execute --report /tmp/staff.tx
 | Флаг | Действие |
 |------|----------|
 | `--execute` | Применить изменения |
+| `--wipe-auxiliary-data` | Дополнительно очистить протоколы, webhook-inbox, задолженности, уведомления и `site_settings` **кроме** ключей `telegram%`. Таблицы **`telegram_integrations`** и **`certificate_settings`** не трогаются. |
 | `--delete-portal-users` | Дополнительно удалить учётки **только** с ролью `user` (без staff) |
 | `--report путь` | Записать отчёт (email staff и роли) |
+
+Файлы `.env` скрипт не изменяет — только БД через `DATABASE_URL`.
 
 **Пароли не сбрасываются** — в отчёте только email и роль; вход для staff остаётся прежним, если вы не меняли БД вручную.
 
@@ -41,7 +66,8 @@ poetry run python scripts/db_cleanup_doctors.py --execute --report /tmp/staff.tx
 | **`roles`** | Скрипт сам создаёт недостающие роли. |
 | **`plans`** (тарифы: вступительный, годовой и т.д.) | **Не удаляются** скриптом. Если удаляли БД целиком — нужны начальные планы (миграции/ручной ввод/фикстуры). |
 | **`cities`** | Скрипт не трогает. Пустой справочник — добавить через админку или SQL. |
-| **`site_settings`** | Не трогаются. |
+| **`site_settings`** | По умолчанию не трогаются. С флагом `--wipe-auxiliary-data` удаляются все строки, **кроме** ключей, начинающихся с `telegram` (например `telegram_bot_link`). |
+| **`telegram_integrations`**, **`certificate_settings`** | **Никогда** не удаляются скриптом. |
 | **`notification_templates`** | Не трогаются. |
 | **Первый admin** | Если после полного сброса БД никого нет — `python scripts/create_admin.py`. |
 | **Импорт врачей / Excel** | Отдельный пайплайн (см. `docs/seed/MIGRATION_PARSER_REQUIREMENTS.md`) — не часть этого скрипта. |

@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
 """Очистка БД: удаление врачей и портальных пользователей, нормализация ролей staff.
 
+Файлы .env / переменные окружения скрипт НЕ читает и НЕ меняет — только подключение к БД
+через уже настроенный DATABASE_URL у процесса.
+
+НИКОГДА не удаляются (ни при каких флагах):
+  • telegram_integrations — токен бота, webhook, owner_chat_id и пр. (единственная строка конфига).
+  • certificate_settings — шаблоны сертификатов (подписи, логотипы, префикс номера и т.д.).
+    Таблица выданных сертификатов certificates удаляется вместе с профилями врачей — это не
+    то же самое, что certificate_settings.
+
+При --wipe-auxiliary-data дополнительно очищаются служебные данные, но:
+  • в site_settings сохраняются строки, у которых key начинается с «telegram» (например
+    telegram_bot_link), чтобы не сбросить публичные/связанные с Telegram ключи.
+
 Что делает (при --execute):
 1. Нормализует роли сотрудников: у каждого с ролями admin/manager/accountant остаётся одна
    роль (приоритет: admin > manager > accountant).
-2. Удаляет врачей:
+2. Опционально (--wipe-auxiliary-data): протоколы, webhook-inbox, задолженности, уведомления,
+   прочие site_settings (кроме ключей telegram*).
+3. Удаляет врачей:
    - только врач (без staff): полное удаление пользователя;
    - врач + staff: снимается роль doctor, удаляется doctor_profile и связанное, staff сохраняется.
-3. Опционально (--delete-portal-users): удаляет пользователей только с ролью user (без staff).
+4. Опционально (--delete-portal-users): удаляет пользователей только с ролью user (без staff).
 
 Пароли не меняются — хэши в БД сохраняются. Печатается список email staff.
 
@@ -16,6 +31,7 @@
 Usage (из каталога backend):
   poetry run python scripts/db_cleanup_doctors.py
   poetry run python scripts/db_cleanup_doctors.py --execute
+  poetry run python scripts/db_cleanup_doctors.py --execute --wipe-auxiliary-data
   poetry run python scripts/db_cleanup_doctors.py --execute --delete-portal-users --report /tmp/report.txt
 """
 
@@ -35,18 +51,23 @@ if __name__ == "__main__" and "__file__" in dir():
     if _backend not in sys.path:
         sys.path.insert(0, _backend)
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, not_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.models.arrears import MembershipArrear
 from app.models.certificates import Certificate
 from app.models.content import Article, ContentBlock
 from app.models.events import Event
+from app.models.payment_webhook_inbox import PaymentWebhookInbox
 from app.models.profiles import DoctorProfile, ModerationHistory
 from app.models.protocol_history import ProtocolHistoryEntry
+from app.models.site import SiteSetting
 from app.models.subscriptions import Payment, Receipt, Subscription
-from app.models.users import Role, User, UserRoleAssignment
+from app.models.users import Notification, Role, User, UserRoleAssignment
 from app.models.voting import Vote, VotingCandidate, VotingSession
+
+# TelegramIntegration и CertificateSettings намеренно не импортируются: эти таблицы не очищаются.
 
 STAFF_ROLE_NAMES = ("admin", "manager", "accountant")
 STAFF_PRIORITY = {"admin": 0, "manager": 1, "accountant": 2}
@@ -254,6 +275,53 @@ async def _user_has_staff(session: AsyncSession, user_id: UUID, role_map: dict[s
     return int(n) > 0
 
 
+async def wipe_auxiliary_business_data(session: AsyncSession, dry_run: bool) -> None:
+    """Очистка служебных данных без трогания telegram_integrations и certificate_settings.
+
+    site_settings: удаляются все строки, кроме тех, чей key начинается с «telegram»
+    (например telegram_bot_link), чтобы сохранить публичную ссылку на бота и аналогичные ключи.
+    """
+    print("\n=== Вспомогательные данные (wipe-auxiliary-data) ===\n")
+
+    n_ph = (
+        await session.execute(select(func.count()).select_from(ProtocolHistoryEntry))
+    ).scalar_one()
+    n_inbox = (
+        await session.execute(select(func.count()).select_from(PaymentWebhookInbox))
+    ).scalar_one()
+    n_arr = (
+        await session.execute(select(func.count()).select_from(MembershipArrear))
+    ).scalar_one()
+    n_notif = (await session.execute(select(func.count()).select_from(Notification))).scalar_one()
+    n_site = (await session.execute(select(func.count()).select_from(SiteSetting))).scalar_one()
+    n_site_tg = (
+        await session.execute(
+            select(func.count()).select_from(SiteSetting).where(SiteSetting.key.like("telegram%"))
+        )
+    ).scalar_one()
+
+    if dry_run:
+        print(f"  [dry-run] DELETE protocol_history_entries ({n_ph} rows)")
+        print(f"  [dry-run] DELETE payment_webhook_inbox ({n_inbox} rows)")
+        print(f"  [dry-run] DELETE membership_arrears ({n_arr} rows)")
+        print(f"  [dry-run] DELETE notifications ({n_notif} rows)")
+        print(
+            f"  [dry-run] DELETE site_settings кроме telegram* "
+            f"(всего {n_site}, оставить {n_site_tg} строк с ключом telegram% )"
+        )
+        return
+
+    await session.execute(delete(ProtocolHistoryEntry))
+    await session.execute(delete(PaymentWebhookInbox))
+    await session.execute(delete(MembershipArrear))
+    await session.execute(delete(Notification))
+    await session.execute(delete(SiteSetting).where(not_(SiteSetting.key.like("telegram%"))))
+    print(
+        f"  Удалено: protocol_entries, webhook_inbox, arrears, notifications; "
+        f"site_settings кроме {n_site_tg} строк(и) с ключом telegram% ."
+    )
+
+
 async def collect_portal_only_user_ids(
     session: AsyncSession, role_map: dict[str, Role], exclude: set[UUID]
 ) -> list[UUID]:
@@ -282,7 +350,13 @@ async def collect_portal_only_user_ids(
     return out
 
 
-async def run(*, dry_run: bool, delete_portal_users_flag: bool, report_path: str | None) -> None:
+async def run(
+    *,
+    dry_run: bool,
+    delete_portal_users_flag: bool,
+    wipe_auxiliary_data: bool,
+    report_path: str | None,
+) -> None:
     engine = create_async_engine(str(settings.DATABASE_URL), pool_pre_ping=True)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -292,6 +366,9 @@ async def run(*, dry_run: bool, delete_portal_users_flag: bool, report_path: str
 
         print("=== 1. Нормализация ролей staff ===\n")
         await normalize_staff_roles(session, role_map, dry_run)
+
+        if wipe_auxiliary_data:
+            await wipe_auxiliary_business_data(session, dry_run)
 
         print("\n=== 2. Врачи ===\n")
         doctor_rid = role_map["doctor"].id
@@ -381,6 +458,15 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--execute", action="store_true", help="Выполнить (по умолчанию dry-run)")
     p.add_argument(
+        "--wipe-auxiliary-data",
+        action="store_true",
+        help=(
+            "Дополнительно очистить protocol_history, webhook inbox, arrears, notifications "
+            "и site_settings (кроме ключей telegram*). Не трогает telegram_integrations и "
+            "certificate_settings."
+        ),
+    )
+    p.add_argument(
         "--delete-portal-users",
         action="store_true",
         help="Удалить пользователей только с ролью user (без staff)",
@@ -391,6 +477,7 @@ def main() -> None:
         run(
             dry_run=not args.execute,
             delete_portal_users_flag=args.delete_portal_users,
+            wipe_auxiliary_data=args.wipe_auxiliary_data,
             report_path=args.report.strip() or None,
         )
     )
