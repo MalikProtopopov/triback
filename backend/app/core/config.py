@@ -128,6 +128,8 @@ class Settings(BaseSettings):
     # Telegram
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHANNEL_ID: str = ""
+    # Чат для выгрузок XLSX (POST /exports/*/telegram); если пусто — используется TELEGRAM_CHANNEL_ID
+    TELEGRAM_EXPORTS_CHAT_ID: str = ""
     TELEGRAM_WEBHOOK_SECRET: str = ""
 
     # API (для полных URL в ответах, например download_url сертификатов)

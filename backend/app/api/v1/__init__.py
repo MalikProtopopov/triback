@@ -12,6 +12,7 @@ from app.api.v1.content_blocks_admin import router as content_blocks_admin_route
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.doctors_admin import router as doctors_admin_router
 from app.api.v1.events_admin import router as events_admin_router
+from app.api.v1.exports import router as exports_router
 from app.api.v1.notifications_admin import router as notifications_admin_router
 from app.api.v1.onboarding import router as onboarding_router
 from app.api.v1.payments_admin import router as payments_admin_router
@@ -46,6 +47,7 @@ router.include_router(telegram_admin_router, tags=["Admin - Telegram"])
 router.include_router(certificates_admin_router, tags=["Admin - Certificates"])
 router.include_router(doctors_admin_router, tags=["Admin - Doctors"])
 router.include_router(payments_admin_router, tags=["Admin - Payments"])
+router.include_router(exports_router, tags=["Exports"])
 router.include_router(arrears_admin_router, tags=["Admin - Arrears"])
 router.include_router(
     protocol_history_admin_router, tags=["Admin - Protocol History"]

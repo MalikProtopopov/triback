@@ -50,6 +50,33 @@ class TelegramService:
             data: dict[str, Any] = resp.json()
             return data
 
+    async def send_document(
+        self,
+        chat_id: int,
+        document: bytes,
+        filename: str,
+        *,
+        caption: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a file to a Telegram chat (Bot API sendDocument)."""
+        if not self._base:
+            raise ValueError("Telegram bot token not configured")
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        files = {"document": (filename, document, mime)}
+        data: dict[str, Any] = {"chat_id": str(chat_id)}
+        if caption:
+            data["caption"] = caption[:1024]
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(f"{self._base}/sendDocument", data=data, files=files)
+            try:
+                out: dict[str, Any] = resp.json()
+            except Exception:
+                resp.raise_for_status()
+                raise ValueError(resp.text)
+            if not out.get("ok"):
+                raise ValueError(out.get("description", "Telegram sendDocument failed"))
+            return out
+
     async def add_to_channel(self, tg_user_id: int) -> None:
         """Unban (=add) user from the private Telegram channel."""
         if not self._base or not self._owner_chat_id:
