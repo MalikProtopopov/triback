@@ -1,15 +1,17 @@
 """Webhook endpoints — YooKassa & Moneta payment notifications."""
 
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db_session
 from app.core.enums import PaymentStatus, ReceiptStatus
 from app.core.exceptions import ForbiddenError
@@ -20,7 +22,18 @@ from app.core.logging_privacy import (
 from app.core.rate_limit import limiter
 from app.core.redis import get_redis
 from app.models.subscriptions import Payment, Receipt
+from app.models.users import User
 from app.schemas.payments import WebhookPayload
+from app.services.kassa_payanyway_fiscal import (
+    FiscalRebuildError,
+    build_client_json,
+    build_inventory_json,
+    build_kassa_error_xml,
+    build_kassa_fiscal_xml,
+    fiscal_seller_from_settings,
+    get_payment_by_mnt_transaction_id,
+    payment_items_for_fiscal,
+)
 from app.services.payment_providers.moneta_client import MonetaPaymentProvider
 from app.services.payment_utils import is_moneta_receipt_webhook_authorized
 from app.services.payment_webhook_routing import (
@@ -118,6 +131,114 @@ async def _collect_moneta_params(request: Request) -> dict[str, str]:
     return params
 
 
+async def _load_user_email(db: AsyncSession, user_id: UUID) -> str | None:
+    row = await db.execute(select(User.email).where(User.id == user_id))
+    return row.scalar_one_or_none()
+
+
+async def _moneta_pay_process(
+    db: AsyncSession,
+    redis: Redis,
+    params: dict[str, str],
+) -> Literal["duplicate", "ok", "fail"]:
+    """Shared Moneta Pay URL: dedup, verify, cancel or mark succeeded."""
+    mnt_operation_id = params.get("MNT_OPERATION_ID", "")
+    mnt_command = params.get("MNT_COMMAND", "")
+    dedup_key = f"webhook:dedup:moneta:{mnt_operation_id}" if mnt_operation_id else None
+
+    if mnt_operation_id:
+        is_new = await redis.set(
+            dedup_key, "1", ex=YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS, nx=True
+        )
+        if not is_new:
+            return "duplicate"
+
+    provider = MonetaPaymentProvider()
+    try:
+        webhook_data = await provider.verify_webhook(params)
+    except ValueError as e:
+        logger.warning(
+            "moneta_signature_invalid",
+            reason=str(e),
+            params_safe=moneta_params_for_log(params),
+        )
+        if mnt_operation_id and dedup_key:
+            await redis.delete(dedup_key)
+        return "fail"
+
+    if mnt_command in ("CANCELLED_DEBIT", "CANCELLED_CREDIT"):
+        try:
+            payment_id = UUID(webhook_data.transaction_id)
+            result = await db.execute(
+                select(Payment).where(Payment.id == payment_id).with_for_update()
+            )
+            payment = result.scalar_one_or_none()
+            if payment:
+                svc = PaymentWebhookService(db)
+                await svc._handle_payment_canceled(payment)
+                logger.info(
+                    "moneta_payment_cancelled",
+                    payment_id=str(payment_id),
+                    mnt_command=mnt_command,
+                )
+        except Exception:
+            logger.exception("moneta_cancelled_webhook_error", mnt_command=mnt_command)
+        return "ok"
+
+    try:
+        payment_id = UUID(webhook_data.transaction_id)
+        result = await db.execute(
+            select(Payment).where(Payment.id == payment_id).with_for_update()
+        )
+        payment = result.scalar_one_or_none()
+        if not payment:
+            logger.warning(
+                "moneta_payment_not_found",
+                transaction_id=webhook_data.transaction_id,
+                mnt_operation_id=mnt_operation_id,
+            )
+            if mnt_operation_id and dedup_key:
+                await redis.delete(dedup_key)
+            return "fail"
+
+        payment.moneta_operation_id = webhook_data.external_id
+
+        svc = PaymentWebhookService(db)
+        await svc.handle_moneta_payment_succeeded(payment)
+    except Exception:
+        logger.exception("moneta_webhook_processing_error")
+        if mnt_operation_id and dedup_key:
+            await redis.delete(dedup_key)
+        return "fail"
+
+    return "ok"
+
+
+async def _kassa_fiscal_xml_for_payment(
+    db: AsyncSession,
+    payment: Payment,
+    params: dict[str, str],
+) -> str:
+    """Full kassa MNT_RESPONSE XML with INVENTORY/CLIENT (R8)."""
+    mnt_id = params.get("MNT_ID", "")
+    mnt_transaction_id = params.get("MNT_TRANSACTION_ID", "")
+    mnt_amount = Decimal(params.get("MNT_AMOUNT", "0"))
+    seller = fiscal_seller_from_settings()
+    items = await payment_items_for_fiscal(db, payment)
+    inv_json = build_inventory_json(items, seller, mnt_amount)
+    email = await _load_user_email(db, payment.user_id)
+    client_json = build_client_json(email, None)
+    return build_kassa_fiscal_xml(
+        mnt_id=mnt_id,
+        mnt_transaction_id=mnt_transaction_id,
+        result_code="200",
+        inventory_json=inv_json,
+        client_json=client_json,
+        integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+        sno=settings.MONETA_FISCAL_SNO,
+    )
+
+
 @router.get(
     "/moneta",
     summary="Moneta Pay URL webhook",
@@ -171,30 +292,102 @@ async def moneta_pay_webhook(
         user_agent=user_agent[:80] if user_agent else None,
         params_safe=moneta_params_for_log(params),
     )
-    mnt_operation_id = params.get("MNT_OPERATION_ID", "")
-    mnt_command = params.get("MNT_COMMAND", "")
+    outcome = await _moneta_pay_process(db, redis, params)
+    if outcome == "fail":
+        return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+    return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
 
-    dedup_key = f"webhook:dedup:moneta:{mnt_operation_id}"
-    if mnt_operation_id:
-        is_new = await redis.set(
-            dedup_key, "1", ex=YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS, nx=True
+
+@router.get(
+    "/moneta/kassa",
+    summary="Moneta Pay URL for kassa.payanyway.ru (XML INVENTORY/CLIENT)",
+    operation_id="moneta_kassa_pay_webhook_get",
+)
+@router.post(
+    "/moneta/kassa",
+    summary="Moneta Pay URL for kassa.payanyway.ru (XML INVENTORY/CLIENT)",
+    operation_id="moneta_kassa_pay_webhook_post",
+)
+async def moneta_kassa_pay_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    """Pay URL после перенаправления с kassa — ответ ``application/xml`` (путь A)."""
+    if not settings.MONETA_KASSA_FISCAL_ENABLED:
+        raise HTTPException(
+            status_code=404,
+            detail="Moneta kassa fiscal endpoint is disabled",
         )
-        if not is_new:
-            return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
+
+    forwarded = request.headers.get("x-forwarded-for")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+    if not client_ip and request.client:
+        client_ip = request.client.host
+    user_agent = request.headers.get("user-agent", "")
+    params = await _collect_moneta_params(request)
+
+    logger.info(
+        "moneta_kassa_pay_request",
+        method=request.method,
+        client_ip=client_ip,
+        user_agent=user_agent[:80] if user_agent else None,
+        params_safe=moneta_params_for_log(params),
+    )
 
     provider = MonetaPaymentProvider()
     try:
         webhook_data = await provider.verify_webhook(params)
     except ValueError as e:
         logger.warning(
-            "moneta_signature_invalid",
+            "moneta_kassa_signature_invalid",
             reason=str(e),
             params_safe=moneta_params_for_log(params),
         )
-        # Release dedup key so a legitimate retry isn't permanently blocked.
-        if mnt_operation_id:
-            await redis.delete(dedup_key)
-        return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+        xml = build_kassa_error_xml(
+            mnt_id=params.get("MNT_ID", ""),
+            mnt_transaction_id=params.get("MNT_TRANSACTION_ID", ""),
+            result_code="500",
+            integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+        )
+        return Response(content=xml, media_type="application/xml")
+
+    mnt_operation_id = params.get("MNT_OPERATION_ID", "")
+    mnt_command = params.get("MNT_COMMAND", "")
+    dedup_key = f"webhook:dedup:moneta:{mnt_operation_id}" if mnt_operation_id else None
+
+    if mnt_operation_id:
+        is_new = await redis.set(
+            dedup_key, "1", ex=YOOKASSA_WEBHOOK_DEDUP_TTL_SECONDS, nx=True
+        )
+        if not is_new:
+            payment = await get_payment_by_mnt_transaction_id(
+                db, webhook_data.transaction_id
+            )
+            if not payment:
+                xml = build_kassa_error_xml(
+                    mnt_id=params.get("MNT_ID", ""),
+                    mnt_transaction_id=params.get("MNT_TRANSACTION_ID", ""),
+                    result_code="500",
+                    integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+                )
+                return Response(content=xml, media_type="application/xml")
+            try:
+                xml = await _kassa_fiscal_xml_for_payment(db, payment, params)
+            except FiscalRebuildError as exc:
+                logger.warning(
+                    "moneta_kassa_fiscal_rebuild_failed",
+                    error=str(exc),
+                    payment_id=str(payment.id),
+                )
+                xml = build_kassa_error_xml(
+                    mnt_id=params.get("MNT_ID", ""),
+                    mnt_transaction_id=params.get("MNT_TRANSACTION_ID", ""),
+                    result_code="500",
+                    integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+                )
+                return Response(content=xml, media_type="application/xml")
+            return Response(content=xml, media_type="application/xml")
 
     if mnt_command in ("CANCELLED_DEBIT", "CANCELLED_CREDIT"):
         try:
@@ -213,8 +406,27 @@ async def moneta_pay_webhook(
                 )
         except Exception:
             logger.exception("moneta_cancelled_webhook_error", mnt_command=mnt_command)
-        return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
+        email: str | None = None
+        try:
+            pid = UUID(webhook_data.transaction_id)
+            pr = await db.get(Payment, pid)
+            if pr:
+                email = await _load_user_email(db, pr.user_id)
+        except Exception:
+            pass
+        client_json = build_client_json(email, None)
+        xml = build_kassa_fiscal_xml(
+            mnt_id=params.get("MNT_ID", ""),
+            mnt_transaction_id=params.get("MNT_TRANSACTION_ID", ""),
+            result_code="200",
+            inventory_json="[]",
+            client_json=client_json,
+            integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+            sno=settings.MONETA_FISCAL_SNO,
+        )
+        return Response(content=xml, media_type="application/xml")
 
+    payment: Payment | None = None
     try:
         payment_id = UUID(webhook_data.transaction_id)
         result = await db.execute(
@@ -227,21 +439,50 @@ async def moneta_pay_webhook(
                 transaction_id=webhook_data.transaction_id,
                 mnt_operation_id=mnt_operation_id,
             )
-            if mnt_operation_id:
+            if mnt_operation_id and dedup_key:
                 await redis.delete(dedup_key)
-            return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+            xml = build_kassa_error_xml(
+                mnt_id=params.get("MNT_ID", ""),
+                mnt_transaction_id=params.get("MNT_TRANSACTION_ID", ""),
+                result_code="500",
+                integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+            )
+            return Response(content=xml, media_type="application/xml")
 
         payment.moneta_operation_id = webhook_data.external_id
 
         svc = PaymentWebhookService(db)
         await svc.handle_moneta_payment_succeeded(payment)
     except Exception:
-        logger.exception("moneta_webhook_processing_error")
-        if mnt_operation_id:
+        logger.exception("moneta_kassa_webhook_processing_error")
+        if mnt_operation_id and dedup_key:
             await redis.delete(dedup_key)
-        return PlainTextResponse("FAIL", media_type="text/plain; charset=utf-8")
+        xml = build_kassa_error_xml(
+            mnt_id=params.get("MNT_ID", ""),
+            mnt_transaction_id=params.get("MNT_TRANSACTION_ID", ""),
+            result_code="500",
+            integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+        )
+        return Response(content=xml, media_type="application/xml")
 
-    return PlainTextResponse("SUCCESS", media_type="text/plain; charset=utf-8")
+    assert payment is not None
+    try:
+        xml = await _kassa_fiscal_xml_for_payment(db, payment, params)
+    except FiscalRebuildError as exc:
+        logger.warning(
+            "moneta_kassa_fiscal_rebuild_failed",
+            error=str(exc),
+            payment_id=str(payment.id),
+        )
+        xml = build_kassa_error_xml(
+            mnt_id=params.get("MNT_ID", ""),
+            mnt_transaction_id=params.get("MNT_TRANSACTION_ID", ""),
+            result_code="500",
+            integrity_secret=settings.MONETA_WEBHOOK_SECRET,
+        )
+        return Response(content=xml, media_type="application/xml")
+
+    return Response(content=xml, media_type="application/xml")
 
 
 # ------------------------------------------------------------------

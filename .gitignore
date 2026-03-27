@@ -2,6 +2,8 @@
 .env
 .env.prod
 backend/.env
+# Локальная копия чеклиста env (см. docs/env-production-trichologia.ru.template.md)
+docs/env-production-trichologia.ru.md
 
 # SSL certificates (managed by certbot)
 certbot/

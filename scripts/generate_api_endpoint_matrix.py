@@ -27,6 +27,7 @@ TRUST_OVERRIDES: dict[str, str] = {
     "/api/v1/webhooks/yookassa": "IP allowlist `YOOKASSA_IP_WHITELIST` (+ dedup Redis)",
     "/api/v1/webhooks/yookassa/v2": "Feature flag; IP allowlist; inbox + TaskIQ",
     "/api/v1/webhooks/moneta": "Подпись Moneta Pay URL (MD5) + dedup Redis",
+    "/api/v1/webhooks/moneta/kassa": "kassa Pay URL: XML INVENTORY/CLIENT (MONETA_KASSA_FISCAL_ENABLED)",
     "/api/v1/webhooks/moneta/check": "Подпись Moneta Check URL (MD5)",
     "/api/v1/webhooks/moneta/receipt": "Заголовок `X-Moneta-Receipt-Secret` и/или `MONETA_RECEIPT_IP_ALLOWLIST`",
     "/api/v1/telegram/webhook": "Telegram (legacy; без JWT)",

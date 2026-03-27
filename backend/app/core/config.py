@@ -99,6 +99,15 @@ class Settings(BaseSettings):
     # Moneta — payment form version (v3 supports SBP, SberPay)
     MONETA_FORM_VERSION: str = "v3"
 
+    # Moneta — kassa.payanyway.ru Pay URL (path A): XML with INVENTORY/CLIENT on /webhooks/moneta/kassa
+    MONETA_KASSA_FISCAL_ENABLED: bool = False
+    MONETA_FISCAL_SELLER_INN: str = ""
+    MONETA_FISCAL_SELLER_NAME: str = ""
+    MONETA_FISCAL_SELLER_PHONE: str = ""
+    MONETA_FISCAL_SELLER_ACCOUNT: str = ""
+    # 1 ОСНО … 6 ПСН; optional SNO attribute in kassa XML
+    MONETA_FISCAL_SNO: int | None = None
+
     # Feature flags
     # Enable the new inbox-based YooKassa webhook pipeline (/webhooks/yookassa/v2).
     # When True, the new endpoint persists raw webhooks to payment_webhook_inbox and

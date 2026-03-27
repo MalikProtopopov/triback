@@ -88,6 +88,18 @@ def _validate_production_config() -> None:
                     raise RuntimeError(
                         f"{attr} must be non-empty in production when PAYMENT_PROVIDER=moneta ({hint})."
                     )
+            if settings.MONETA_KASSA_FISCAL_ENABLED:
+                for attr in (
+                    "MONETA_FISCAL_SELLER_INN",
+                    "MONETA_FISCAL_SELLER_NAME",
+                    "MONETA_FISCAL_SELLER_PHONE",
+                    "MONETA_FISCAL_SELLER_ACCOUNT",
+                ):
+                    if not str(getattr(settings, attr, "") or "").strip():
+                        raise RuntimeError(
+                            f"{attr} must be non-empty in production when "
+                            "MONETA_KASSA_FISCAL_ENABLED=true (kassa Pay URL / INVENTORY)."
+                        )
         if (settings.TELEGRAM_BOT_TOKEN or "").strip() and not (
             settings.TELEGRAM_WEBHOOK_SECRET or ""
         ).strip():
