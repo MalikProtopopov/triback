@@ -13,7 +13,7 @@ from app.core.exceptions import NotFoundError
 from app.core.utils import generate_unique_slug
 from app.models.content import ContentBlock, OrganizationDocument
 from app.schemas.content_admin import OrgDocDetailResponse, OrgDocListItem
-from app.schemas.shared import ContentBlockNested
+from app.schemas.shared import block_to_nested
 from app.services import file_service
 
 DOCUMENT_MIMES = file_service.IMAGE_MIMES | {"application/pdf"}
@@ -147,15 +147,5 @@ class OrgDocAdminService:
             sort_order=d.sort_order, is_active=d.is_active,
             updated_by=d.updated_by,
             created_at=d.created_at, updated_at=d.updated_at,
-            content_blocks=[
-                ContentBlockNested(
-                    id=b.id, block_type=b.block_type, sort_order=b.sort_order,
-                    title=b.title, content=b.content,
-                    media_url=file_service.build_media_url(b.media_url),
-                    thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                    link_url=b.link_url, link_label=b.link_label,
-                    device_type=b.device_type, block_metadata=b.block_metadata,
-                )
-                for b in blocks
-            ],
+            content_blocks=[block_to_nested(b) for b in blocks],
         )

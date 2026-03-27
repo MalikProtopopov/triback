@@ -2,6 +2,7 @@
 
 from app.models.base import Base  # noqa: F401
 from app.models.certificate_settings import CertificateSettings  # noqa: F401
+from app.models.media_asset import MediaAsset  # noqa: F401
 from app.models.certificates import Certificate  # noqa: F401
 from app.models.cities import City  # noqa: F401
 from app.models.content import (  # noqa: F401

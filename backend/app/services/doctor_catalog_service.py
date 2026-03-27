@@ -15,7 +15,7 @@ from app.models.cities import City
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Subscription
 from app.schemas.public import DoctorPublicDetailResponse, DoctorPublicListItem, SeoNested
-from app.schemas.shared import ContentBlockPublicNested
+from app.schemas.shared import content_block_to_public
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 from app.services.membership_arrears_service import (
@@ -171,21 +171,7 @@ class DoctorCatalogService:
         )
 
         blocks = await list_blocks_for_entity(self.db, "doctor_profile", dp.id)
-        content_blocks = [
-            ContentBlockPublicNested(
-                id=str(b.id),
-                block_type=b.block_type,
-                sort_order=b.sort_order,
-                title=b.title,
-                content=b.content,
-                media_url=file_service.build_media_url(b.media_url),
-                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                link_url=b.link_url,
-                link_label=b.link_label,
-                device_type=b.device_type,
-            )
-            for b in blocks
-        ]
+        content_blocks = [content_block_to_public(b) for b in blocks]
 
         return DoctorPublicDetailResponse(
             id=dp.id,

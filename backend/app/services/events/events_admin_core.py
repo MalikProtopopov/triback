@@ -28,7 +28,7 @@ from app.schemas.events_admin import (
     RecordingNested,
     TariffNested,
 )
-from app.schemas.shared import ContentBlockNested
+from app.schemas.shared import block_to_nested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 
@@ -192,17 +192,7 @@ class EventsAdminCore:
         ]
 
         blocks = await list_blocks_for_entity(self.db, "event", ev.id)
-        content_blocks = [
-            ContentBlockNested(
-                id=b.id, block_type=b.block_type, sort_order=b.sort_order,
-                title=b.title, content=b.content,
-                media_url=file_service.build_media_url(b.media_url),
-                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                link_url=b.link_url, link_label=b.link_label,
-                device_type=b.device_type, block_metadata=b.block_metadata,
-            )
-            for b in blocks
-        ]
+        content_blocks = [block_to_nested(b) for b in blocks]
 
         return EventDetailResponse(
             id=ev.id, title=ev.title, slug=ev.slug, description=ev.description,

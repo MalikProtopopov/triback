@@ -11,7 +11,7 @@ from app.core.exceptions import NotFoundError
 from app.core.openapi import error_responses
 from app.models.content import ContentBlock, OrganizationDocument
 from app.schemas.public import OrgDocPublicDetailResponse, OrgDocPublicListResponse
-from app.schemas.shared import ContentBlockPublicNested
+from app.schemas.shared import content_block_to_public
 from app.services import file_service
 
 router = APIRouter()
@@ -86,19 +86,5 @@ async def get_organization_document(
         slug=doc.slug,
         content=doc.content,
         file_url=file_service.build_media_url(doc.file_url),
-        content_blocks=[
-            ContentBlockPublicNested(
-                id=str(b.id),
-                block_type=b.block_type,
-                sort_order=b.sort_order,
-                title=b.title,
-                content=b.content,
-                media_url=file_service.build_media_url(b.media_url),
-                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                link_url=b.link_url,
-                link_label=b.link_label,
-                device_type=b.device_type,
-            )
-            for b in blocks
-        ],
+        content_blocks=[content_block_to_public(b) for b in blocks],
     )

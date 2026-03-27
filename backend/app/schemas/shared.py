@@ -13,6 +13,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.services import file_service
+
 # ── Nested schemas ────────────────────────────────────────────────
 
 
@@ -60,7 +62,7 @@ class ContentBlockNested(BaseModel):
 
 
 class ContentBlockPublicNested(BaseModel):
-    """Public-facing content block (no metadata, string id)."""
+    """Public-facing content block; ``block_metadata`` URLs are fully resolved."""
     id: str
     block_type: str
     sort_order: int
@@ -71,6 +73,7 @@ class ContentBlockPublicNested(BaseModel):
     link_url: str | None = None
     link_label: str | None = None
     device_type: str
+    block_metadata: dict[str, Any] | None = None
 
 
 # ── Mapper helpers ────────────────────────────────────────────────
@@ -118,25 +121,35 @@ def block_to_nested(b: Any) -> ContentBlockNested:
         sort_order=b.sort_order,
         title=b.title,
         content=b.content,
-        media_url=b.media_url,
-        thumbnail_url=b.thumbnail_url,
+        media_url=file_service.build_media_url(b.media_url),
+        thumbnail_url=file_service.build_media_url(b.thumbnail_url),
         link_url=b.link_url,
         link_label=b.link_label,
         device_type=b.device_type,
-        block_metadata=b.block_metadata,
+        block_metadata=file_service.enrich_block_metadata_urls(
+            b.block_metadata, b.block_type
+        ),
     )
 
 
-def block_to_public_nested(b: Any) -> ContentBlockPublicNested:
+def content_block_to_public(b: Any) -> ContentBlockPublicNested:
+    """Map a :class:`~app.models.content.ContentBlock` row to the public DTO."""
     return ContentBlockPublicNested(
         id=str(b.id),
         block_type=b.block_type,
         sort_order=b.sort_order,
         title=b.title,
         content=b.content,
-        media_url=b.media_url,
-        thumbnail_url=b.thumbnail_url,
+        media_url=file_service.build_media_url(b.media_url),
+        thumbnail_url=file_service.build_media_url(b.thumbnail_url),
         link_url=b.link_url,
         link_label=b.link_label,
         device_type=b.device_type,
+        block_metadata=file_service.enrich_block_metadata_urls(
+            b.block_metadata, b.block_type
+        ),
     )
+
+
+def block_to_public_nested(b: Any) -> ContentBlockPublicNested:
+    return content_block_to_public(b)

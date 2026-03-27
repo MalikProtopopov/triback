@@ -28,8 +28,8 @@ from app.schemas.doctor_admin import (
     PendingDraftNested,
 )
 from app.schemas.shared import (
-    ContentBlockNested,
     SubscriptionNested,
+    block_to_nested,
     city_to_nested,
     payment_to_nested,
     subscription_to_nested,
@@ -371,22 +371,7 @@ class DoctorAdminRead:
             payments=[payment_to_nested(p) for p in payments_rows],
             pending_draft=pending_draft,
             moderation_history=mod_items,
-            content_blocks=[
-                ContentBlockNested(
-                    id=b.id,
-                    block_type=b.block_type,
-                    sort_order=b.sort_order,
-                    title=b.title,
-                    content=b.content,
-                    media_url=file_service.build_media_url(b.media_url),
-                    thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                    link_url=b.link_url,
-                    link_label=b.link_label,
-                    device_type=b.device_type,
-                    block_metadata=b.block_metadata,
-                )
-                for b in blocks
-            ],
+            content_blocks=[block_to_nested(b) for b in blocks],
             telegram_linked=tg_binding is not None,
             tg_username=tg_binding.tg_username if tg_binding else None,
             board_role=dp.board_role,

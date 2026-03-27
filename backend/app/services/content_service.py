@@ -29,7 +29,7 @@ from app.schemas.content_admin import (
     OrgDocDetailResponse,
     ThemeAdminResponse,
 )
-from app.schemas.shared import ContentBlockNested, ThemeNested
+from app.schemas.shared import ThemeNested, block_to_nested
 from app.services import file_service
 from app.services.content_block_service import list_blocks_for_entity
 from app.services.org_doc_admin_service import OrgDocAdminService
@@ -152,17 +152,7 @@ class ContentAdminService:
             raise NotFoundError("Article not found")
 
         blocks = await list_blocks_for_entity(self.db, "article", a.id)
-        content_blocks = [
-            ContentBlockNested(
-                id=b.id, block_type=b.block_type, sort_order=b.sort_order,
-                title=b.title, content=b.content,
-                media_url=file_service.build_media_url(b.media_url),
-                thumbnail_url=file_service.build_media_url(b.thumbnail_url),
-                link_url=b.link_url, link_label=b.link_label,
-                device_type=b.device_type, block_metadata=b.block_metadata,
-            )
-            for b in blocks
-        ]
+        content_blocks = [block_to_nested(b) for b in blocks]
 
         return ArticleAdminDetailResponse(
             id=a.id, slug=a.slug, title=a.title, content=a.content,

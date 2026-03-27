@@ -1,5 +1,6 @@
 """File service — async S3 operations via aioboto3, image resize via Pillow."""
 
+import copy
 import io
 import uuid
 from typing import Any
@@ -27,6 +28,33 @@ def build_media_url(s3_key: str | None) -> str | None:
     if not base:
         return s3_key
     return f"{base.rstrip('/')}/{s3_key.lstrip('/')}"
+
+
+def enrich_block_metadata_urls(
+    metadata: dict[str, Any] | None, block_type: str
+) -> dict[str, Any] | None:
+    """Resolve S3 keys to public URLs inside ``block_metadata`` (e.g. gallery images).
+
+    Leaves values that are already absolute ``http://`` or ``https://`` unchanged.
+    """
+    if not metadata:
+        return None
+    if block_type != "gallery":
+        return metadata
+    out = copy.deepcopy(metadata)
+    images = out.get("images")
+    if not isinstance(images, list):
+        return out
+    for item in images:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("url")
+        if not isinstance(raw, str) or not raw:
+            continue
+        if raw.startswith("http://") or raw.startswith("https://"):
+            continue
+        item["url"] = build_media_url(raw) or raw
+    return out
 
 
 def _get_s3_session() -> aioboto3.Session:

@@ -203,6 +203,7 @@ _OPENAPI_TAGS = [
     {"name": "Admin - SEO", "description": "Управление SEO-метаданными страниц"},
     {"name": "Admin - Users", "description": "Управление сотрудниками системы: администраторы, менеджеры, бухгалтеры"},
     {"name": "Admin - Content Blocks", "description": "Управление контентными блоками сущностей (статьи, мероприятия, профили врачей)"},
+    {"name": "Admin - Media", "description": "Медиатека: загрузка изображений в S3 и список ключей для контент-блоков"},
     {"name": "Webhooks", "description": "Внутренние webhook-эндпоинты (YooKassa). Не вызывать напрямую."},
     {"name": "System", "description": "Служебные эндпоинты: health check"},
 ]
