@@ -27,6 +27,8 @@ router = APIRouter(prefix="/admin")
 
 ADMIN_ONLY = require_role("admin")
 ADMIN_MANAGER = require_role("admin", "manager")
+# Справочник городов для селектов в админке (в т.ч. бухгалтер)
+ADMIN_LIST_CITIES = require_role("admin", "manager", "accountant")
 
 
 # ══ Site Settings ═════════════════════════════════════════════════
@@ -82,13 +84,13 @@ async def update_settings(
     responses=error_responses(401, 403),
 )
 async def list_cities(
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_LIST_CITIES,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Все города с подсчётом врачей.
 
     - **401** — не авторизован
-    - **403** — роль не admin/manager
+    - **403** — роль не admin/manager/accountant
     """
     svc = SettingsAdminService(db)
     items = await svc.list_cities()
