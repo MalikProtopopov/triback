@@ -1,4 +1,4 @@
-.PHONY: dev dev-down dev-logs prod prod-down prod-logs migrate migration deploy ssl-init ssl-renew backup worker
+.PHONY: dev dev-down dev-logs prod prod-down prod-logs migrate migration deploy restart-backend ssl-init ssl-renew backup worker
 
 # ── Dev ──────────────────────────────────────────────────────────
 dev:
@@ -33,6 +33,10 @@ migration:
 # ── Deploy ───────────────────────────────────────────────────────
 deploy:
 	./scripts/deploy.sh
+
+# Prod: только перезапуск контейнеров (на сервере, с .env.prod в корне)
+restart-backend:
+	./scripts/restart-backend.sh
 
 # ── SSL ──────────────────────────────────────────────────────────
 ssl-init:
