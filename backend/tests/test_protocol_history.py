@@ -101,15 +101,47 @@ async def test_protocol_history_create_list_patch_delete(
 
 
 @pytest.mark.anyio
-async def test_protocol_history_accountant_forbidden(
+async def test_protocol_history_accountant_crud(
     client: AsyncClient,
+    doctor_user: User,
+    doctor_with_profile: DoctorProfile,
+    accountant_user: User,
     auth_headers_accountant: dict[str, str],
 ):
     r = await client.get(
         "/api/v1/admin/protocol-history",
         headers=auth_headers_accountant,
     )
-    assert r.status_code == 403
+    assert r.status_code == 200
+
+    r = await client.post(
+        "/api/v1/admin/protocol-history",
+        headers=auth_headers_accountant,
+        json={
+            "year": 2025,
+            "protocol_title": "Бухгалтер",
+            "doctor_user_id": str(doctor_user.id),
+            "action_type": "admission",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["created_by_user_id"] == str(accountant_user.id)
+    entry_id = body["id"]
+
+    r_patch = await client.patch(
+        f"/api/v1/admin/protocol-history/{entry_id}",
+        headers=auth_headers_accountant,
+        json={"notes": "acct"},
+    )
+    assert r_patch.status_code == 200
+    assert r_patch.json()["last_edited_by_user_id"] == str(accountant_user.id)
+
+    r_del = await client.delete(
+        f"/api/v1/admin/protocol-history/{entry_id}",
+        headers=auth_headers_accountant,
+    )
+    assert r_del.status_code == 204
 
 
 @pytest.mark.anyio

@@ -37,7 +37,7 @@ from app.services.doctor_service import DoctorAdminService
 
 router = APIRouter(prefix="/admin")
 
-ADMIN_MANAGER = require_role("admin", "manager")
+ADMIN_MANAGER_PLUS = require_role("admin", "manager", "accountant")
 ADMIN_ONLY = require_role("admin")
 ADMIN_ACCOUNTANT = require_role("admin", "accountant")
 
@@ -49,7 +49,7 @@ ADMIN_ACCOUNTANT = require_role("admin", "accountant")
     responses=error_responses(401, 403),
 )
 async def list_doctors(
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -65,7 +65,7 @@ async def list_doctors(
     """Пагинированный список врачей с фильтрацией и сортировкой.
 
     - **401** — не авторизован
-    - **403** — роль не admin/manager
+    - **403** — роль не admin/manager/accountant
     """
     svc = DoctorAdminService(db)
     return await svc.list_doctors(
@@ -113,7 +113,7 @@ async def create_doctor(
 async def update_doctor_board_role(
     profile_id: UUID,
     body: DoctorBoardRoleUpdateRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> DoctorDetailResponse:
     """Обновляет роль врача в правлении (pravlenie | president | null).
@@ -149,7 +149,7 @@ async def update_doctor_payment_overrides(
 )
 async def get_doctor(
     profile_id: UUID,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> DoctorDetailResponse:
     """Полная карточка врача с личными данными, документами, подпиской.
@@ -169,7 +169,7 @@ async def get_doctor(
 async def moderate_doctor(
     profile_id: UUID,
     body: ModerateRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> ModerateResponse:
     """Одобряет или отклоняет анкету врача.
@@ -192,7 +192,7 @@ async def moderate_doctor(
 async def approve_draft(
     profile_id: UUID,
     body: ApproveDraftRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
     """Одобряет или отклоняет черновые изменения публичного профиля.
@@ -216,7 +216,7 @@ async def approve_draft(
 async def toggle_active(
     profile_id: UUID,
     body: ToggleActiveRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> ToggleActiveResponse:
     """Включает/выключает публичную видимость профиля в каталоге.
@@ -239,7 +239,7 @@ async def toggle_active(
 async def send_reminder(
     profile_id: UUID,
     body: SendReminderRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
     """Отправляет напоминание врачу (email + Telegram при наличии привязки).
@@ -264,7 +264,7 @@ async def send_reminder(
 async def send_email(
     profile_id: UUID,
     body: SendEmailRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageResponse:
     """Отправляет email врачу.
@@ -329,7 +329,7 @@ async def get_import_status(
 )
 async def get_portal_user(
     user_id: UUID,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
 ) -> PortalUserDetailResponse:
     """Полная информация о пользователе портала (аккаунт + профиль).
@@ -348,7 +348,7 @@ async def get_portal_user(
 )
 async def list_portal_user_event_registrations(
     user_id: UUID,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -362,7 +362,7 @@ async def list_portal_user_event_registrations(
     Тело ответа совпадает с ``GET /api/v1/profile/event-registrations``.
 
     - **401** — не авторизован
-    - **403** — роль не admin/manager
+    - **403** — роль не admin/manager/accountant
     """
     from app.services.event_registration.user_registrations_list import (
         list_registrations_for_user,
@@ -388,7 +388,7 @@ async def list_portal_user_event_registrations(
     responses=error_responses(401, 403),
 )
 async def list_portal_users(
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_MANAGER_PLUS,
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -399,7 +399,7 @@ async def list_portal_users(
     """Пагинированный список всех зарегистрированных пользователей.
 
     - **401** — не авторизован
-    - **403** — роль не admin/manager
+    - **403** — роль не admin/manager/accountant
     """
     svc = DoctorAdminService(db)
     return await svc.list_portal_users(

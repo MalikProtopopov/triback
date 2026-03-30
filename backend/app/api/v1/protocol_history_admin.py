@@ -19,7 +19,7 @@ from app.services.protocol_history_admin_service import ProtocolHistoryAdminServ
 
 router = APIRouter(prefix="/admin")
 
-ADMIN_MANAGER = require_role("admin", "manager")
+ADMIN_PROTOCOL_STAFF = require_role("admin", "manager", "accountant")
 
 
 @router.get(
@@ -29,7 +29,7 @@ ADMIN_MANAGER = require_role("admin", "manager")
     responses=error_responses(401, 403),
 )
 async def list_protocol_history(
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_PROTOCOL_STAFF,
     db: AsyncSession = Depends(get_db_session),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -55,7 +55,7 @@ async def list_protocol_history(
 )
 async def get_protocol_history(
     entry_id: UUID,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_PROTOCOL_STAFF,
     db: AsyncSession = Depends(get_db_session),
 ) -> ProtocolHistoryResponse:
     svc = ProtocolHistoryAdminService(db)
@@ -71,7 +71,7 @@ async def get_protocol_history(
 )
 async def create_protocol_history(
     body: ProtocolHistoryCreateRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_PROTOCOL_STAFF,
     db: AsyncSession = Depends(get_db_session),
 ) -> ProtocolHistoryResponse:
     actor_id = UUID(payload["sub"])
@@ -88,7 +88,7 @@ async def create_protocol_history(
 async def update_protocol_history(
     entry_id: UUID,
     body: ProtocolHistoryUpdateRequest,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_PROTOCOL_STAFF,
     db: AsyncSession = Depends(get_db_session),
 ) -> ProtocolHistoryResponse:
     actor_id = UUID(payload["sub"])
@@ -104,7 +104,7 @@ async def update_protocol_history(
 )
 async def delete_protocol_history(
     entry_id: UUID,
-    payload: dict[str, Any] = ADMIN_MANAGER,
+    payload: dict[str, Any] = ADMIN_PROTOCOL_STAFF,
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     svc = ProtocolHistoryAdminService(db)

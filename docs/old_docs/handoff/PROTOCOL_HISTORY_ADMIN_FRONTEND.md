@@ -8,7 +8,7 @@
 |------|----------------------------------------|----------------|
 | `admin` | да | `protocol_history`, также `arrears` |
 | `manager` | да | `protocol_history` |
-| `accountant` | нет (403) | `arrears`, **без** `protocol_history` |
+| `accountant` | да (как у manager) | `payments`, `arrears`, `doctors`, `protocol_history` |
 
 Ключи приходят в **`sidebar_sections`** в ответе логина и в эндпоинте текущего пользователя (см. Auth). Фронт мапит ключ `protocol_history` на пункт меню и роут (например `/admin/protocol-history`).
 
@@ -139,7 +139,7 @@
 | Код | Когда |
 |-----|--------|
 | 401 | Нет или невалидный токен |
-| 403 | Роль не `admin` и не `manager` |
+| 403 | Роль не `admin`, `manager` и не `accountant` |
 | 404 | Запись не найдена (GET/PATCH/DELETE) |
 | 422 | Ошибка валидации тела/врач не найден как врач |
 
@@ -153,7 +153,7 @@
 
 ## Чеклист фронта
 
-- [ ] Пункт меню по ключу `protocol_history` (admin, manager).
+- [ ] Пункт меню по ключу `protocol_history` (admin, manager, accountant).
 - [ ] Таблица: фильтры по врачу и типу действия; сортировка с бэка уже «новые сверху».
 - [ ] Форма создания/редактирования; enum `action_type` на UI: «Приём» / «Исключение».
 - [ ] Отображение `created_by_user` / `last_edited_by_user` и дат.

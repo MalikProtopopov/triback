@@ -150,7 +150,7 @@ async def test_export_event_registrations_by_event_id(
 
 
 @pytest.mark.anyio
-async def test_export_doctors_forbidden_for_accountant(
+async def test_export_doctors_ok_accountant(
     client: AsyncClient,
     auth_headers_accountant: dict[str, str],
 ):
@@ -158,7 +158,10 @@ async def test_export_doctors_forbidden_for_accountant(
         "/api/v1/exports/doctors",
         headers=auth_headers_accountant,
     )
-    assert r.status_code == 403
+    assert r.status_code == 200
+    assert "spreadsheetml" in (r.headers.get("content-type") or "")
+    wb = load_workbook(BytesIO(r.content))
+    assert "Врачи" in wb.sheetnames
 
 
 @pytest.mark.anyio
@@ -186,6 +189,22 @@ async def test_export_protocol_history_ok_manager(
     r = await client.get(
         "/api/v1/exports/protocol-history",
         headers=auth_headers_manager,
+    )
+    assert r.status_code == 200
+    wb = load_workbook(BytesIO(r.content))
+    assert "Протоколы" in wb.sheetnames
+    ws = wb["Протоколы"]
+    assert ws.cell(row=1, column=1).value == "ID записи"
+
+
+@pytest.mark.anyio
+async def test_export_protocol_history_ok_accountant(
+    client: AsyncClient,
+    auth_headers_accountant: dict[str, str],
+):
+    r = await client.get(
+        "/api/v1/exports/protocol-history",
+        headers=auth_headers_accountant,
     )
     assert r.status_code == 200
     wb = load_workbook(BytesIO(r.content))

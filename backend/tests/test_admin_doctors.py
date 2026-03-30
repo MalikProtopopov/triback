@@ -165,11 +165,12 @@ async def test_admin_list_requires_auth(client: AsyncClient):
     assert resp.status_code == 401
 
 
-async def test_admin_list_accountant_forbidden(
+async def test_admin_list_accountant_ok(
     client: AsyncClient, auth_headers_accountant: dict[str, str]
 ):
     resp = await client.get(ADMIN_DOCTORS_URL, headers=auth_headers_accountant)
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert "data" in resp.json()
 
 
 async def test_admin_list_success(

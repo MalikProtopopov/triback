@@ -1,4 +1,4 @@
-"""XLSX exports: finance (accountant, manager, admin) and management (manager, admin)."""
+"""XLSX exports: finance (accountant, manager, admin); doctors/protocol-history also for accountant."""
 
 from __future__ import annotations
 
@@ -28,7 +28,8 @@ from app.services.exports.payloads import (
 router = APIRouter(prefix="/exports")
 
 STAFF_FINANCE = require_role("admin", "manager", "accountant")
-STAFF_MANAGEMENT = require_role("admin", "manager")
+# Doctors + protocol history exports: admin, manager, accountant
+STAFF_MANAGEMENT_EXPORTS = require_role("admin", "manager", "accountant")
 
 XLSX_MEDIA = (
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -343,7 +344,7 @@ async def export_subscriptions_telegram(
     responses=error_responses(400, 401, 403),
 )
 async def export_doctors(
-    _: dict[str, Any] = STAFF_MANAGEMENT,
+    _: dict[str, Any] = STAFF_MANAGEMENT_EXPORTS,
     db: AsyncSession = Depends(get_db_session),
     status: Annotated[list[str] | None, Query()] = None,
     city_id: Annotated[list[UUID] | None, Query()] = None,
@@ -384,7 +385,7 @@ async def export_doctors(
     responses=error_responses(400, 401, 403, 502, 503),
 )
 async def export_doctors_telegram(
-    _: dict[str, Any] = STAFF_MANAGEMENT,
+    _: dict[str, Any] = STAFF_MANAGEMENT_EXPORTS,
     db: AsyncSession = Depends(get_db_session),
     status: Annotated[list[str] | None, Query()] = None,
     city_id: Annotated[list[UUID] | None, Query()] = None,
@@ -424,7 +425,7 @@ async def export_doctors_telegram(
     responses=error_responses(400, 401, 403),
 )
 async def export_protocol_history(
-    _: dict[str, Any] = STAFF_MANAGEMENT,
+    _: dict[str, Any] = STAFF_MANAGEMENT_EXPORTS,
     db: AsyncSession = Depends(get_db_session),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -461,7 +462,7 @@ async def export_protocol_history(
     responses=error_responses(400, 401, 403, 502, 503),
 )
 async def export_protocol_history_telegram(
-    _: dict[str, Any] = STAFF_MANAGEMENT,
+    _: dict[str, Any] = STAFF_MANAGEMENT_EXPORTS,
     db: AsyncSession = Depends(get_db_session),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),

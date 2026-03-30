@@ -1,374 +1,201 @@
 # Backend Rules — AI Coding Guide
 
-> Этот файл используется как контекст/rules при работе с AI-ассистентом (Cursor, Claude).
-> Подключай его к проекту чтобы AI следовал единым стандартам бэкенда.
+> Контекст для AI (Cursor и т.д.) при работе с репозиторием **trihoback**.  
+> Фактический код — в `backend/`; при расхождении с документом приоритет у кода.
 
 ---
 
 ## Стек
 
 | Категория | Технология |
-|-----------|-----------|
-| Язык | Python 3.11+ |
+|-----------|------------|
+| Язык | Python 3.11 |
 | Фреймворк | FastAPI |
-| ORM | SQLAlchemy 2.0 (async) |
+| ORM | SQLAlchemy 2.0 (async), asyncpg |
 | БД | PostgreSQL 16 |
-| Кэш | Redis 7 |
-| Миграции | Alembic |
-| Auth | JWT (access + refresh), bcrypt |
+| Кэш / брокер задач | Redis 7 + **Taskiq** |
+| Миграции | Alembic (`backend/alembic/`) |
+| Auth | JWT **RS256** (ключи в PEM), access + refresh; пароли — **Argon2id** |
 | Валидация | Pydantic v2 |
-| Логирование | structlog (JSON) |
-| Линтинг | ruff, mypy |
+| Логирование | structlog (JSON в prod) |
+| Лимиты | slowapi |
+| HTTP-клиент к платежкам | httpx |
+| Линтинг / формат | ruff (см. `pyproject.toml`) |
 
 ---
 
-## Архитектура: модульная структура
+## Структура каталогов (как устроен проект)
 
-Каждый модуль — изолированная бизнес-область:
+Проект **не** использует схему `app/modules/{name}/`. Основные слои:
 
 ```
-backend/app/modules/{module_name}/
-  models.py      # SQLAlchemy модели
-  schemas.py     # Pydantic схемы (Create/Update/Response)
-  service.py     # Бизнес-логика (классы сервисов)
-  router.py      # FastAPI эндпоинты
-  dependencies.py  # (опционально) DI зависимости модуля
+backend/app/
+  main.py              # FastAPI app, CORS, middleware, роутеры, lifespan
+  core/                # config, database, redis, security, exceptions, logging, permissions, pagination …
+  api/v1/              # HTTP-роутеры по доменам (auth, subscriptions, webhooks, admin/*, public/* …)
+  models/              # SQLAlchemy-модели (+ enums в base.py при необходимости)
+  schemas/             # Pydantic-схемы запросов/ответов
+  services/            # Бизнес-логика (часто пакеты: subscriptions/, exports/, event_registration/ …)
+  tasks/               # Taskiq: broker, email_tasks, telegram_tasks, scheduler …
 ```
 
 ### Правила
 
-- **Бизнес-логика** — только в `service.py`, НЕ в роутах
-- **Роуты** — тонкие, только валидация входа → вызов сервиса → возврат ответа
-- **Модели** — описание таблиц, связи, constraints
-- **Схемы** — контракт API (что принимаем, что отдаём)
+- **Бизнес-логика** — в `services/` (и вложенных модулях), а не в толстых роутерах.
+- **Роуты** — тонкие: парсинг входа, зависимости `Depends`, вызов сервиса, ответ.
+- **Модели** — таблицы и связи; общие миксины — `app/models/base.py`.
+- **Схемы** — контракт API; для ответов из ORM — `model_config = ConfigDict(from_attributes=True)`.
+
+Пример паттерна (идея, не копировать дословно):
 
 ```python
-# router.py — тонкий роутер
-@router.post("/users", response_model=UserResponse, status_code=201)
-async def create_user(
-    data: UserCreate,
+# api/v1/example.py
+@router.post("/items", response_model=ItemResponse, status_code=201)
+async def create_item(
+    data: ItemCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: AdminUser = Depends(get_current_user),
+    _: AdminUser = Depends(require_staff_admin),  # или другая зависимость роли
 ):
-    service = UserService(db)
-    return await service.create(data, created_by=current_user.id)
+    return await ItemService(db).create(data)
 ```
 
 ---
 
-## База данных
+## База данных и модели
 
-### Миксины (наследуй от них все модели)
+### Миксины (`app/models/base.py`)
 
-```python
-class UUIDMixin:
-    """UUID v4 как первичный ключ"""
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+- **`UUIDMixin`** — первичный ключ **UUID v7** (`uuid_utils`), не v4.
+- **`TimestampMixin`** — `created_at` / `updated_at` с `server_default=func.now()`.
+- **`SoftDeleteMixin`** — `is_deleted`, `deleted_at` (используется не везде — смотреть конкретную модель).
 
-class TimestampMixin:
-    """created_at / updated_at автоматические"""
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+`VersionMixin` в коде может отсутствовать — не выдумывать, проверять `base.py`.
 
-class SoftDeleteMixin:
-    """Мягкое удаление вместо DELETE"""
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+### Правила
 
-class VersionMixin:
-    """Optimistic locking"""
-    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-```
-
-### Правила моделей
-
-- UUID v4 для всех PK
-- `server_default` для default-значений (не Python-level)
-- `CheckConstraint` для enum-like полей:
-
-```python
-__table_args__ = (
-    CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_posts_status"),
-    Index("ix_posts_tenant_status", "tenant_id", "status"),
-)
-```
-
-- Индексы на поля фильтрации и сортировки
-- `ForeignKey(..., ondelete="CASCADE")` или `SET NULL` — указывать всегда
-- `comment=` на полях для документирования
+- Для enum-подобных полей часто используются **PostgreSQL native enum** (`SAEnum` в `base.py`), не только `CheckConstraint`.
+- Внешние ключи: явно указывать `ondelete` (CASCADE / SET NULL и т.д.).
+- Индексы — на фильтры и сортировки в списках.
 
 ---
 
 ## Миграции (Alembic)
 
+Команды из каталога `backend/` (или через `docker compose exec backend`):
+
 ```bash
-# Создать миграцию
-alembic revision --autogenerate -m "add_users_table"
-
-# Применить
+alembic revision --autogenerate -m "описание"
 alembic upgrade head
-
-# Откатить
 alembic downgrade -1
 ```
 
-### Правила миграций
-
-- Имена файлов: `NNN_description.py` (NNN — порядковый номер)
-- Всегда проверять сгенерированный код (autogenerate не ловит всё)
-- `downgrade()` обязателен и должен работать
-- Данные: `INSERT` / `UPDATE` в миграциях, если нужна инициализация
+- Проверять сгенерированный код вручную.
+- `downgrade()` должен быть осмысленным.
 
 ---
 
-## Pydantic-схемы
+## Pydantic и API
 
-### Паттерн: Create / Update / Response
+- Паттерны **Create / Update / Response** по месту использования; имена файлов — по домену (`schemas/subscriptions.py` и т.д.).
+- Пароли и токены в **Response** не отдавать.
+- Пагинация — см. `app/core/pagination.py` и существующие list-эндпоинты.
 
-```python
-# schemas.py
-from pydantic import BaseModel, ConfigDict
-from uuid import UUID
-from datetime import datetime
+### Ошибки
 
+Стандартное тело ошибки приложения — **обёртка `error`**, не полный RFC 7807:
 
-class UserCreate(BaseModel):
-    """Что принимаем при создании"""
-    email: str
-    first_name: str
-    role: str = "editor"
-
-
-class UserUpdate(BaseModel):
-    """Что принимаем при обновлении (все поля Optional)"""
-    first_name: str | None = None
-    last_name: str | None = None
-    role: str | None = None
-
-
-class UserResponse(BaseModel):
-    """Что отдаём клиенту"""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    email: str
-    first_name: str
-    last_name: str | None
-    role: str
-    is_active: bool
-    created_at: datetime
-```
-
-### Правила
-
-- `from_attributes=True` в Response-схемах (маппинг из ORM)
-- Чувствительные данные (password, tokens) НИКОГДА не в Response
-- Валидация через `@field_validator` или `@model_validator`
-- Документирование полей: `Field(..., description="...")`
-
----
-
-## API-дизайн
-
-### URL-структура
-
-```
-/api/v1/{resource}          — CRUD коллекции
-/api/v1/{resource}/{id}     — CRUD элемента
-/api/v1/public/...          — Публичные эндпоинты (без auth)
-/api/v1/auth/...            — Аутентификация
-```
-
-### HTTP-методы
-
-| Метод | Использование | Код |
-|-------|--------------|-----|
-| GET | Получение | 200 |
-| POST | Создание | 201 |
-| PATCH | Частичное обновление | 200 |
-| DELETE | Удаление | 204 |
-
-### Пагинация
-
-```python
-# Стандартные параметры
-class PaginationParams:
-    page: int = Query(1, ge=1)
-    page_size: int = Query(20, ge=1, le=100)
-
-# Стандартный ответ
-class PaginatedResponse(BaseModel, Generic[T]):
-    items: list[T]
-    total: int
-    page: int
-    page_size: int
-    pages: int  # total / page_size
-```
-
-### Ошибки (RFC 7807)
-
-```python
-# Все ошибки в формате RFC 7807
+```json
 {
-    "type": "https://api.example.com/errors/not_found",
-    "title": "Not Found",
-    "status": 404,
-    "detail": "User with id '...' not found",
-    "instance": "/api/v1/users/..."
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "…",
+    "details": {}
+  }
 }
 ```
 
+Исключения: `AppError` и наследники в `app/core/exceptions.py`, хендлеры в `register_exception_handlers`.
+
+### Префиксы URL
+
+- Основной API: `/api/v1/...`
+- Публичные: `/api/v1/public/...`
+- Админка: `/api/v1/...` с проверкой роли (staff)
+- Webhooks: `/api/v1/webhooks/...` (Moneta, kassa, Telegram и т.д.)
+
+Health: **`GET /api/v1/health`** (используется в Docker healthcheck и деплое).
+
 ---
 
-## Аутентификация и авторизация
+## Аутентификация и роли
 
-### JWT
+- JWT подписывается **RS256**; пути к ключам — `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` (в контейнере часто volume `./backend/keys` → `/app/keys`).
+- В payload access-токена: `sub` (user id), `role`, `type`, `aud`, `iss`, сроки.
+- **Multi-tenant `tenant_id` в JWT в этом проекте нет** — не добавлять в правила вымышленный контекст тенанта.
+- Роли для UI/доступа к разделам — см. `app/core/permissions.py`: staff (`admin`, `manager`, `accountant`), клиенты (`doctor`, `user`, `pending`). Точные проверки в эндпоинтах — через зависимости в `core/security.py` / админские deps.
+- Ключи сайдбара для **`accountant`**: `payments`, `arrears`, `doctors`, `protocol_history` (тот же периметр по врачам и истории протоколов, что у `manager`, кроме эндпоинтов только для `admin` — создание врача вручную, импорт). Выгрузки `GET /exports/doctors` и `GET /exports/protocol-history` (и telegram-варианты) доступны бухгалтеру.
 
-- **Access token**: короткий TTL (15-30 мин)
-- **Refresh token**: длинный TTL (7-30 дней), хранится в БД
-- `tenant_id` в payload — определяет контекст тенанта
-- Ротация refresh-токенов при каждом обновлении
+В **production** при старте выполняется `_validate_production_config()` в `main.py`: сильные секреты, ключи JWT, `DATABASE_URL`, обязательные поля Moneta/YooKassa при выбранном провайдере, фискализация и т.д.
 
-### RBAC
+---
+
+## Фоновые задачи
+
+- **Taskiq** worker: сервис `worker` в compose, команда `taskiq worker app.tasks:broker`.
+- Задачи — в `app/tasks/`; планировщик — `scheduler.py` при включённой конфигурации.
+
+---
+
+## Платежи и внешние интеграции
+
+- Провайдер задаётся **`PAYMENT_PROVIDER`** (`moneta` — основной сценарий, опционально `yookassa`).
+- Логика создания платежей и вебхуков — `services/payment_*`, `api/v1/webhooks.py`, клиенты в `services/payment_providers/`.
+- Фискализация Pay URL / kassa — `services/kassa_payanyway_fiscal.py` (при включённых настройках).
+
+При изменении платежного потока сверяться с `docs/handoff/kassaspecification.md` и `docs/env-production-trichologia.ru.template.md`.
+
+---
+
+## S3 / медиа
+
+- Dev и prod в compose используют **MinIO** (S3-совместимый endpoint внутри сети).
+- Публичные URL медиа в prod часто идут через **nginx** `/media/` → proxy на MinIO bucket (см. `nginx/templates/api.conf.template`).
+
+---
+
+## Логирование
 
 ```python
-# Роли
-ROLES = ["platform_owner", "admin", "editor", "viewer"]
+from app.core.logging import get_logger
 
-# Проверка в роутах
-@router.delete("/users/{user_id}", dependencies=[Depends(require_role("admin"))])
-async def delete_user(user_id: UUID, ...):
-    ...
+logger = get_logger(__name__)
+logger.info("event_name", key=value)
 ```
+
+События — структурированные поля, без логирования секретов и полных тел платежных callback’ов в открытом виде.
 
 ---
 
-## Dependency Injection (FastAPI Depends)
+## Код-стиль
 
-```python
-# Стандартные зависимости
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Сессия БД"""
-
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> AdminUser:
-    """Текущий пользователь из JWT"""
-
-async def get_current_tenant_id(request: Request) -> UUID:
-    """Tenant ID из заголовка X-Tenant-ID или из JWT"""
-
-def get_pagination(page: int = 1, page_size: int = 20) -> PaginationParams:
-    """Параметры пагинации"""
-```
+- Type hints по возможности на публичных функциях и методах.
+- Следовать существующему стилю файла (импорты, `from __future__ import annotations` где уже принято).
+- **ruff** — единый линтер/форматер; перед коммитом прогон по проекту.
 
 ---
 
-## Транзакции
+## Тесты
 
-```python
-# Декоратор для автоматического commit/rollback
-@transactional
-async def create_order(self, data: OrderCreate) -> Order:
-    order = Order(**data.model_dump())
-    self.db.add(order)
-    await self.db.flush()  # Получить ID до commit
-    # Если исключение — автоматический rollback
-    return order
-```
+- `backend/tests/`, **pytest**, async-тесты с маркерами по необходимости.
+- При добавлении критичной логики — тесты рядом с доменом (как уже сделано для kassa/webhooks и т.д.).
 
 ---
 
-## Логирование (structlog)
+## Чек-лист для AI при новой фиче
 
-```python
-import structlog
-
-logger = structlog.get_logger()
-
-# Структурированные логи
-logger.info("user_created", user_id=str(user.id), email=user.email, tenant_id=str(tenant_id))
-logger.error("email_send_failed", error=str(e), provider="smtp", tenant_id=str(tenant_id))
-```
-
-Формат: JSON для машинного парсинга. Каждый лог — событие с контекстом.
-
----
-
-## Код-стайл
-
-| Правило | Значение |
-|---------|---------|
-| Type hints | Обязательны на всех функциях |
-| Длина строки | 100 символов |
-| Docstrings | Google-стиль |
-| Линтер | ruff (format + lint) |
-| Типы | mypy (strict) |
-| Именование | snake_case для всего, PascalCase для классов |
-
-```python
-async def get_user_by_email(
-    db: AsyncSession,
-    email: str,
-    *,
-    include_deleted: bool = False,
-) -> User | None:
-    """Получить пользователя по email.
-
-    Args:
-        db: Сессия базы данных.
-        email: Email пользователя.
-        include_deleted: Включать мягко удалённые записи.
-
-    Returns:
-        Пользователь или None если не найден.
-    """
-    query = select(User).where(User.email == email)
-    if not include_deleted:
-        query = query.where(User.is_deleted == False)
-    result = await db.execute(query)
-    return result.scalar_one_or_none()
-```
-
----
-
-## Тестирование
-
-```python
-# Стек: pytest + pytest-asyncio + httpx + factory-boy
-import pytest
-from httpx import AsyncClient
-
-@pytest.mark.asyncio
-async def test_create_user(client: AsyncClient, auth_headers: dict):
-    response = await client.post(
-        "/api/v1/users",
-        json={"email": "test@example.com", "first_name": "Test"},
-        headers=auth_headers,
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["email"] == "test@example.com"
-```
-
-### Правила тестов
-
-- Каждый тест — изолированный (fixture-based setup/teardown)
-- Factory-boy для создания тестовых данных
-- Отдельные фикстуры: `db_session`, `client`, `auth_headers`, `sample_user`
-- Unit-тесты для сервисов, integration-тесты для API
-
----
-
-## Чек-лист для AI
-
-При создании нового модуля убедись что:
-
-- [ ] Структура: `models.py`, `schemas.py`, `service.py`, `router.py`
-- [ ] Модель наследует миксины (UUID, Timestamp, SoftDelete)
-- [ ] Схемы: Create + Update + Response
-- [ ] Сервис содержит бизнес-логику, роутер — тонкий
-- [ ] Пагинация для list-эндпоинтов
-- [ ] Ошибки в формате RFC 7807
-- [ ] Type hints на всех функциях
-- [ ] Миграция Alembic создана
-- [ ] structlog для логирования
-- [ ] Роутер зарегистрирован в главном `app`
+- [ ] Роутер в `api/v1/`, схемы в `schemas/`, логика в `services/`
+- [ ] При необходимости — модель + миграция Alembic
+- [ ] Ошибки через `AppError` / существующие типы, не «голый» HTTPException без стиля проекта
+- [ ] Права доступа согласованы с ролями (`permissions` / deps)
+- [ ] Для prod — новые секреты отражены в `env.prod.example` или шаблоне документации, не в git с реальными значениями
+- [ ] Health / критичные пути не ломают `/api/v1/health`

@@ -42,6 +42,8 @@ _ADMIN_SIDEBAR = {
     "accountant": [
         "payments",
         "arrears",
+        "doctors",
+        "protocol_history",
     ],
 }
 
