@@ -14,6 +14,11 @@ from app.models.certificates import Certificate
 from app.models.profiles import DoctorProfile
 from app.models.subscriptions import Subscription
 from app.schemas.certificates import CertificateVerifyResponse
+from app.services.membership_arrears_service import (
+    arrears_block_enabled,
+    load_site_settings_dict,
+    user_has_open_arrears,
+)
 
 router = APIRouter(prefix="/public/certificates")
 
@@ -67,6 +72,12 @@ async def verify_certificate(
         has_active_sub = sub_result.scalar_one_or_none() is not None
         if not has_active_sub:
             is_valid = False
+
+    if is_valid:
+        settings_data = await load_site_settings_dict(db)
+        if arrears_block_enabled(settings_data):
+            if await user_has_open_arrears(db, cert.user_id):
+                is_valid = False
 
     invalid_reason = None
     if not is_valid:
