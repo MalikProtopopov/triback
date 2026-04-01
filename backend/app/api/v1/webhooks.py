@@ -482,6 +482,11 @@ async def moneta_kassa_pay_webhook(
         )
         return Response(content=xml, media_type="application/xml")
 
+    logger.info(
+        "moneta_kassa_response_xml",
+        payment_id=str(payment.id),
+        xml_body=xml,
+    )
     return Response(content=xml, media_type="application/xml")
 
 
