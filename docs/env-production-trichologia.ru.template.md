@@ -192,7 +192,7 @@ PUBLIC_API_URL=https://api.trichologia.ru
 FRONTEND_URL=https://trichologia.ru
 ADMIN_FRONTEND_URL=https://admin.trichologia.ru
 CERTIFICATE_QR_BASE_URL=
-CORS_ALLOWED_ORIGINS=["https://trichologia.ru","https://www.trichologia.ru","https://admin.trichologia.ru"]
+CORS_ALLOWED_ORIGINS=["https://trichologia.ru","https://admin.trichologia.ru","https://dev.trichologia.ru","https://api.trichologia.ru"]
 COOKIE_DOMAIN=.trichologia.ru
 ACCESS_TOKEN_COOKIE_SAMESITE=none
 
