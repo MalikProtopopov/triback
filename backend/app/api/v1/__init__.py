@@ -13,6 +13,7 @@ from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.doctors_admin import router as doctors_admin_router
 from app.api.v1.events_admin import router as events_admin_router
 from app.api.v1.exports import router as exports_router
+from app.api.v1.faq_admin import router as faq_admin_router
 from app.api.v1.media_admin import router as media_admin_router
 from app.api.v1.notifications_admin import router as notifications_admin_router
 from app.api.v1.onboarding import router as onboarding_router
@@ -58,4 +59,5 @@ router.include_router(dashboard_router, tags=["Admin - Dashboard"])
 router.include_router(notifications_admin_router, tags=["Admin - Notifications"])
 router.include_router(seo_admin_router, tags=["Admin - SEO"])
 router.include_router(users_admin_router, tags=["Admin - Users"])
+router.include_router(faq_admin_router, tags=["Admin - FAQ"])
 router.include_router(webhooks_router, tags=["Webhooks"])

@@ -47,4 +47,5 @@ from app.models.users import (  # noqa: F401
     User,
     UserRoleAssignment,
 )
+from app.models.faq import FaqEntry  # noqa: F401
 from app.models.voting import Vote, VotingCandidate, VotingSession  # noqa: F401
