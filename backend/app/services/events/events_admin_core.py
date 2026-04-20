@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.admin_filters import normalize_msk_day_range
 from app.core.enums import EventRegistrationStatus, EventStatus
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.core.utils import generate_unique_slug
@@ -77,10 +78,11 @@ class EventsAdminCore:
         filters: list[Any] = []
         if status:
             filters.append(Event.status == status)
-        if date_from:
-            filters.append(Event.event_date >= date_from)
-        if date_to:
-            filters.append(Event.event_date <= date_to)
+        lo, hi = normalize_msk_day_range(date_from, date_to)
+        if lo is not None:
+            filters.append(Event.event_date >= lo)
+        if hi is not None:
+            filters.append(Event.event_date < hi)
 
         if filters:
             base = base.where(and_(*filters))

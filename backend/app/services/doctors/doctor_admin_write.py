@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -44,8 +44,10 @@ class DoctorAdminWrite:
         return profile
 
     async def create_doctor(self, data: dict[str, Any]) -> AdminCreateDoctorResponse:
+        email = (data.get("email") or "").strip().lower()
+        data["email"] = email
         existing = await self.db.execute(
-            select(User.id).where(User.email == data["email"])
+            select(User.id).where(func.lower(User.email) == email)
         )
         if existing.scalar_one_or_none():
             raise ConflictError("User with this email already exists")
@@ -59,7 +61,7 @@ class DoctorAdminWrite:
         temp_password = f"Tmp{uuid4().hex[:12]}!"
 
         user = User(
-            email=data["email"],
+            email=email,
             password_hash=hash_password(temp_password),
             email_verified_at=datetime.now(UTC),
             is_active=True,

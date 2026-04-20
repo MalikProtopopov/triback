@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import structlog
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,8 +86,9 @@ async def create_guest_account(
     from app.core.security import hash_password
     from app.models.users import Role, User, UserRoleAssignment
 
+    email = (email or "").strip().lower()
     existing = (
-        await db.execute(select(User).where(User.email == email))
+        await db.execute(select(User).where(func.lower(User.email) == email))
     ).scalar_one_or_none()
     if existing:
         return existing.id

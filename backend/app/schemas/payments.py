@@ -28,6 +28,8 @@ class PaymentListItem(BaseModel):
     has_receipt: bool = False
     paid_at: datetime | None = None
     created_at: datetime
+    external_payment_id: str | None = None
+    moneta_operation_id: str | None = None
 
 
 class PaymentsSummary(BaseModel):

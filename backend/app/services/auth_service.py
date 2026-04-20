@@ -6,12 +6,14 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
+import structlog
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError, UnauthorizedError
+from app.core.logging_privacy import mask_email_for_log
 from app.core.permissions import get_sidebar_sections_for_role
 from app.core.security import (
     create_access_token,
@@ -35,7 +37,14 @@ RESET_PWD_TTL = 3600  # 1 hour
 REFRESH_TTL = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
 EMAIL_CHANGE_TTL = 24 * 3600  # 24 hours
 
+logger = structlog.get_logger(__name__)
+
 _ROLE_PRIORITY = ("admin", "manager", "accountant", "doctor", "user")
+
+
+def normalize_email(email: str) -> str:
+    """Canonical form of an email for lookup and storage — trimmed, lower-cased."""
+    return (email or "").strip().lower()
 
 
 def _pick_role(role_names: list[str]) -> str:
@@ -61,7 +70,10 @@ class AuthService:
     # ------------------------------------------------------------------
 
     async def register(self, email: str, password: str) -> User:
-        existing = await self.db.execute(select(User).where(User.email == email))
+        email = normalize_email(email)
+        existing = await self.db.execute(
+            select(User).where(func.lower(User.email) == email)
+        )
         if existing.scalar_one_or_none():
             raise ConflictError("Email is already registered")
 
@@ -97,14 +109,17 @@ class AuthService:
 
     async def resend_verification_email(self, email: str) -> None:
         """Resend verification email. Always returns without raising for security."""
-        result = await self.db.execute(select(User).where(User.email == email))
+        email = normalize_email(email)
+        result = await self.db.execute(
+            select(User).where(func.lower(User.email) == email)
+        )
         user = result.scalar_one_or_none()
         if not user:
             return
         if user.email_verified_at:
             return
 
-        key = f"resend_verify:{email.lower()}"
+        key = f"resend_verify:{email}"
         count = await self.redis.incr(key)
         if count == 1:
             await self.redis.expire(key, 600)
@@ -124,7 +139,10 @@ class AuthService:
     # ------------------------------------------------------------------
 
     async def login(self, email: str, password: str) -> dict[str, str]:
-        result = await self.db.execute(select(User).where(User.email == email))
+        email = normalize_email(email)
+        result = await self.db.execute(
+            select(User).where(func.lower(User.email) == email)
+        )
         user = result.scalar_one_or_none()
 
         if not user or not verify_password(password, user.password_hash):
@@ -208,10 +226,17 @@ class AuthService:
     # ------------------------------------------------------------------
 
     async def forgot_password(self, email: str) -> None:
-        result = await self.db.execute(select(User).where(User.email == email))
+        normalized = normalize_email(email)
+        masked = mask_email_for_log(normalized)
+        result = await self.db.execute(
+            select(User).where(func.lower(User.email) == normalized)
+        )
         user = result.scalar_one_or_none()
         if not user:
-            return  # never reveal whether email exists
+            # Never reveal whether email exists to the caller, but do log so
+            # support can diagnose "письмо не приходит" reports.
+            logger.info("forgot_password_user_not_found", email_masked=masked)
+            return
 
         staff_roles = {"admin", "manager", "accountant"}
         staff_role_q = await self.db.execute(
@@ -226,7 +251,13 @@ class AuthService:
 
         token = generate_token()
         await self.redis.set(f"reset_pwd:{token}", str(user.id), ex=RESET_PWD_TTL)
-        await send_password_reset_email.kiq(email, token, is_staff=is_staff)
+        await send_password_reset_email.kiq(normalized, token, is_staff=is_staff)
+        logger.info(
+            "forgot_password_enqueued",
+            email_masked=masked,
+            user_id=str(user.id),
+            is_staff=is_staff,
+        )
 
     async def reset_password(self, token: str, new_password: str) -> None:
         user_id = await self.redis.get(f"reset_pwd:{token}")
@@ -269,7 +300,10 @@ class AuthService:
         if not verify_password(password, user.password_hash):
             raise UnauthorizedError("Password is incorrect")
 
-        existing = await self.db.execute(select(User).where(User.email == new_email))
+        new_email = normalize_email(new_email)
+        existing = await self.db.execute(
+            select(User).where(func.lower(User.email) == new_email)
+        )
         if existing.scalar_one_or_none():
             raise ConflictError("Email is already in use")
 
@@ -287,9 +321,11 @@ class AuthService:
 
         data = json.loads(raw)
         user_id = data["user_id"]
-        new_email = data["new_email"]
+        new_email = normalize_email(data["new_email"])
 
-        existing = await self.db.execute(select(User).where(User.email == new_email))
+        existing = await self.db.execute(
+            select(User).where(func.lower(User.email) == new_email)
+        )
         if existing.scalar_one_or_none():
             raise ConflictError("Email is already in use")
 

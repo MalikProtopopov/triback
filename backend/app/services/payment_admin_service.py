@@ -8,10 +8,11 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.core.admin_filters import build_name_ilike_filter, normalize_msk_day_range
 from app.core.enums import PaymentStatus, ProductType
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.models.arrears import MembershipArrear
@@ -49,6 +50,8 @@ class PaymentAdminService:
         user_id: UUID | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        name: str | None = None,
+        provider_id: str | None = None,
         sort_by: str = "created_at",
         sort_order: str = "desc",
     ) -> PaymentListResponse:
@@ -57,9 +60,14 @@ class PaymentAdminService:
         base = (
             select(Payment)
             .join(User, Payment.user_id == User.id)
+            .outerjoin(DoctorProfile, DoctorProfile.user_id == User.id)
             .options(joinedload(Payment.receipts))
         )
-        count_q = select(func.count(Payment.id)).join(User, Payment.user_id == User.id)
+        count_q = (
+            select(func.count(Payment.id))
+            .join(User, Payment.user_id == User.id)
+            .outerjoin(DoctorProfile, DoctorProfile.user_id == User.id)
+        )
 
         filters: list[Any] = []
         if status:
@@ -68,10 +76,32 @@ class PaymentAdminService:
             filters.append(Payment.product_type == product_type)
         if user_id:
             filters.append(Payment.user_id == user_id)
-        if date_from:
-            filters.append(Payment.created_at >= date_from)
-        if date_to:
-            filters.append(Payment.created_at <= date_to)
+
+        lo, hi = normalize_msk_day_range(date_from, date_to)
+        if lo is not None:
+            filters.append(Payment.created_at >= lo)
+        if hi is not None:
+            filters.append(Payment.created_at < hi)
+
+        name_clause = build_name_ilike_filter(
+            name,
+            DoctorProfile.last_name,
+            DoctorProfile.first_name,
+            DoctorProfile.middle_name,
+            User.email,
+        )
+        if name_clause is not None:
+            filters.append(name_clause)
+
+        if provider_id:
+            pid = provider_id.strip()
+            if pid:
+                filters.append(
+                    or_(
+                        Payment.external_payment_id == pid,
+                        Payment.moneta_operation_id == pid,
+                    )
+                )
 
         if filters:
             base = base.where(and_(*filters))
@@ -79,10 +109,14 @@ class PaymentAdminService:
 
         total = (await self.db.execute(count_q)).scalar() or 0
 
-        sum_q = select(
-            func.coalesce(func.sum(Payment.amount).filter(Payment.status == PaymentStatus.SUCCEEDED), 0),
-            func.count(Payment.id).filter(Payment.status == PaymentStatus.SUCCEEDED),
-            func.count(Payment.id).filter(Payment.status == PaymentStatus.PENDING),
+        sum_q = (
+            select(
+                func.coalesce(func.sum(Payment.amount).filter(Payment.status == PaymentStatus.SUCCEEDED), 0),
+                func.count(Payment.id).filter(Payment.status == PaymentStatus.SUCCEEDED),
+                func.count(Payment.id).filter(Payment.status == PaymentStatus.PENDING),
+            )
+            .join(User, Payment.user_id == User.id)
+            .outerjoin(DoctorProfile, DoctorProfile.user_id == User.id)
         )
         if filters:
             sum_q = sum_q.where(and_(*filters))
@@ -135,6 +169,8 @@ class PaymentAdminService:
                     has_receipt=bool(p.receipts) if hasattr(p, "receipts") else False,
                     paid_at=p.paid_at,
                     created_at=p.created_at,
+                    external_payment_id=p.external_payment_id,
+                    moneta_operation_id=p.moneta_operation_id,
                 )
             )
 

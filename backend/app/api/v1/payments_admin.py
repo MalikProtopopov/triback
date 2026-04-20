@@ -46,6 +46,14 @@ async def list_payments(
     user_id: UUID | None = Query(None),
     date_from: datetime | None = Query(None),
     date_to: datetime | None = Query(None),
+    name: str | None = Query(
+        None,
+        description="Поиск по ФИО / email (частичное совпадение, все токены обязательны).",
+    ),
+    provider_id: str | None = Query(
+        None,
+        description="Идентификатор у платёжного провайдера (external_payment_id или moneta_operation_id).",
+    ),
     sort_by: str = Query("created_at"),
     sort_order: str = Query("desc"),
 ) -> PaymentListResponse:
@@ -63,6 +71,8 @@ async def list_payments(
         user_id=user_id,
         date_from=date_from,
         date_to=date_to,
+        name=name,
+        provider_id=provider_id,
         sort_by=sort_by,
         sort_order=sort_order,
     )

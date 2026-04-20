@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import structlog
 from openpyxl import load_workbook
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import DoctorStatus
@@ -57,7 +57,7 @@ class DoctorImportService:
 
             for idx, row in enumerate(rows, start=2):
                 try:
-                    email = str(row[0]).strip() if row[0] else ""
+                    email = str(row[0]).strip().lower() if row[0] else ""
                     first_name = str(row[1]).strip() if len(row) > 1 and row[1] else ""
                     last_name = str(row[2]).strip() if len(row) > 2 and row[2] else ""
                     phone = str(row[3]).strip() if len(row) > 3 and row[3] else ""
@@ -67,7 +67,7 @@ class DoctorImportService:
                         continue
 
                     existing = await self.db.execute(
-                        select(User.id).where(User.email == email)
+                        select(User.id).where(func.lower(User.email) == email)
                     )
                     if existing.scalar_one_or_none():
                         errors.append({"row": idx, "error": f"Duplicate email: {email}"})

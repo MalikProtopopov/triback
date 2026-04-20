@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import EventStatus
@@ -59,8 +59,11 @@ class EventRegistrationService:
 
         from app.models.users import User
 
+        body.guest_email = body.guest_email.strip().lower()
         existing = (
-            await self.db.execute(select(User).where(User.email == body.guest_email))
+            await self.db.execute(
+                select(User).where(func.lower(User.email) == body.guest_email)
+            )
         ).scalar_one_or_none()
 
         if existing:

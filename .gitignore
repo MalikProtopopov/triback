@@ -1,6 +1,8 @@
 # Environment files with secrets
 .env
+.env.*
 .env.prod
+.env.prod.*
 backend/.env
 # Локальная копия чеклиста env (см. docs/env-production-trichologia.ru.template.md)
 docs/env-production-trichologia.ru.md
@@ -13,6 +15,9 @@ admin-dist/
 
 # Backups
 backups/
+
+# Old Drupal DB dump & migration files (local-only, not tracked)
+old_db/
 
 # OS files
 .DS_Store
