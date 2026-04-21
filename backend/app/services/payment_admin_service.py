@@ -138,11 +138,12 @@ class PaymentAdminService:
             for uid, email in u_q.all():
                 user_map[uid] = (uid, email)
             dp_q = await self.db.execute(
-                select(DoctorProfile.user_id, DoctorProfile.first_name, DoctorProfile.last_name)
+                select(DoctorProfile.user_id, DoctorProfile.first_name, DoctorProfile.last_name, DoctorProfile.middle_name)
                 .where(DoctorProfile.user_id.in_(pay_user_ids))
             )
-            for uid, fn, ln in dp_q.all():
-                dp_name_map[uid] = f"{ln} {fn}"
+            for uid, fn, ln, mn in dp_q.all():
+                parts = [p for p in [ln, fn, mn] if p]
+                dp_name_map[uid] = " ".join(parts)
 
         from app.schemas.subscriptions import _STATUS_LABELS
 
